@@ -297,6 +297,25 @@ suite("GuideService", () => {
     assert.strictEqual(deleteLine?.actionLabel, "에디터에서 직접 입력");
   });
 
+  test("builds a level-based learning path with focus items", () => {
+    const service = createService();
+    const defaultModel = service.createViewModel({ language: "ko" });
+    const productiveModel = service.createViewModel({ stage: "productive", language: "ko" });
+    const searchModel = service.createViewModel({ query: "삭제", language: "ko" });
+
+    assert.deepStrictEqual(
+      defaultModel.learningPath.map((step) => step.stage),
+      ["beginner", "productive", "advanced"]
+    );
+    assert.strictEqual(defaultModel.learningPath[0]?.active, true);
+    assert.ok(defaultModel.learningPath.every((step) => step.focusItems.length === 5));
+    assert.ok(defaultModel.learningPath[0]?.title.includes("1단계"));
+    assert.ok(defaultModel.learningPath[0]?.focusItems.some((item) => item.id === "vim-edit-delete-line"));
+
+    assert.strictEqual(productiveModel.learningPath.find((step) => step.stage === "productive")?.active, true);
+    assert.strictEqual(searchModel.learningPath.length, 0);
+  });
+
   test("persists display language through state", async () => {
     const state = new MemoryState();
     const service = createService(state);
@@ -556,6 +575,7 @@ suite("GuideViewProvider", () => {
     assert.ok(fake.webview.html.includes('aria-label="Search guide items"'));
     assert.ok(fake.webview.html.includes('id="favorites-only"'));
     assert.ok(fake.webview.html.includes('id="starter"'));
+    assert.ok(fake.webview.html.includes('id="learning-path"'));
     assert.ok(fake.webview.html.includes('id="vim-summary-status"'));
     assert.ok(fake.webview.html.includes('id="settings-list"'));
     assert.ok(fake.webview.html.includes('id="results"'));
@@ -585,6 +605,8 @@ suite("GuideViewProvider", () => {
     assert.strictEqual(model.totalCount, 60);
     assert.strictEqual(model.resultCount, 60);
     assert.strictEqual(model.starterItems.length, 5);
+    assert.strictEqual(model.learningPath.length, 3);
+    assert.ok(model.learningPath[0]?.focusItems.some((item) => item.id === "vim-mode-insert-before"));
     assert.ok(model.guidanceText.includes("Start with the basics"));
 
     fake.webview.receive({ type: "filter", query: "delete line", category: ALL_CATEGORY, stage: "beginner", favoritesOnly: false });
@@ -593,6 +615,7 @@ suite("GuideViewProvider", () => {
     assert.strictEqual(model.query, "delete line");
     assert.strictEqual(model.stage, "beginner");
     assert.strictEqual(model.favoritesOnly, false);
+    assert.strictEqual(model.learningPath.length, 0);
     assert.ok(model.items.some((item) => item.id === "vim-edit-delete-line"));
 
     fake.webview.receive({ type: "filter", query: "현재 줄 삭제", category: ALL_CATEGORY, stage: "beginner", favoritesOnly: false, language: "ko" });

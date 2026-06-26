@@ -12,6 +12,7 @@ This extension does not emulate Vim and does not replace VSCodeVim.
 - Search across title, keys, description, category, learning stage, and tags.
 - Category and learning-stage filtering.
 - English and Korean display modes, including Korean guide titles/descriptions for junior developers.
+- Level-based learning path that shows what to practice now and what to add next.
 - Compact `Start here` shortcuts for first-run practice.
 - Empty search and no-results states.
 - Favorites stored with VS Code global extension state.
@@ -74,6 +75,7 @@ In the Extension Development Host, verify:
 - Sidebar renders guide items.
 - Search, learning-stage, category, and favorites-only filters update results.
 - Language selector switches between English and Korean, and Korean search terms return matching items.
+- Learning path shows Beginner, Productive, and Advanced steps with focused practice items.
 - `Start here` shortcuts narrow the list to beginner-friendly commands.
 - A no-results state appears for unmatched searches.
 - Favorite toggles persist after reload.
@@ -103,6 +105,7 @@ The webview sends guide item ids to the extension host. It never sends arbitrary
 | Search fields covered | `GuideService` seed and fixture tests |
 | Category and learning-stage filters | `GuideService` filter tests |
 | English/Korean language selector and Korean guide copy | localization coverage tests, `GuideService` Korean search/model tests, `GuideViewProvider` message tests |
+| Level-based learning path | `GuideService` learning path tests, `GuideViewProvider` HTML/model tests, Extension Development Host checklist |
 | Empty query and no-results states | `GuideService` view model tests, `GuideViewProvider` HTML/message tests, Extension Development Host checklist |
 | Favorites add/remove, persist, and favorites-only queue | `GuideService` state/filter tests, `GuideViewProvider` message tests |
 | Start here shortcuts and readable item badges | `GuideViewProvider` HTML/model tests, Extension Development Host checklist |

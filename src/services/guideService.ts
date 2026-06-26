@@ -27,6 +27,23 @@ const STARTER_ITEM_IDS = [
   "vim-edit-yank-line",
   "vscode-command-quick-open"
 ] as const;
+const LEARNING_PATH_ITEM_IDS: Readonly<Record<GuideItemStage, readonly string[]>> = {
+  beginner: STARTER_ITEM_IDS,
+  productive: [
+    "vim-search-forward",
+    "vim-search-next",
+    "vim-text-object-inner-word",
+    "vim-register-system",
+    "vscode-command-find-files"
+  ],
+  advanced: [
+    "vim-macro-record",
+    "vim-macro-play",
+    "vim-window-move-left",
+    "vscodevim-leader-tip",
+    "vscodevim-keybindings-tip"
+  ]
+};
 const CATEGORY_ORDER = [
   "Modes",
   "Motions",
@@ -75,6 +92,18 @@ export interface GuideItemViewModel extends GuideItem {
   readonly actionLabel: string;
 }
 
+export interface GuideLearningPathStep {
+  readonly stage: GuideItemStage;
+  readonly label: string;
+  readonly title: string;
+  readonly description: string;
+  readonly readinessHint: string;
+  readonly focusActionLabel: string;
+  readonly itemCount: number;
+  readonly active: boolean;
+  readonly focusItems: readonly GuideItemViewModel[];
+}
+
 export type GuideStageFilter = typeof ALL_STAGE | GuideItemStage;
 
 export interface GuideStageOption {
@@ -112,6 +141,10 @@ export interface GuideUiText {
   readonly categoryAriaLabel: string;
   readonly favorites: string;
   readonly startHere: string;
+  readonly learningPathTitle: string;
+  readonly learningPathIntro: string;
+  readonly focusItemsLabel: string;
+  readonly currentLevel: string;
   readonly refresh: string;
   readonly copy: string;
   readonly run: string;
@@ -151,6 +184,7 @@ export interface GuideViewModel {
   readonly noResults: boolean;
   readonly items: readonly GuideItemViewModel[];
   readonly starterItems: readonly GuideItemViewModel[];
+  readonly learningPath: readonly GuideLearningPathStep[];
   readonly guidanceText: string;
   readonly ui: GuideUiText;
   readonly vscodeVim: VscodeVimSnapshot;
@@ -315,6 +349,7 @@ export class GuideService {
       .filter((item) => !filters.favoritesOnly || favoriteIds.has(item.id))
       .map((item) => this.toViewModel(item, favoriteIds, filters.language));
     const starterItems = this.getStarterItems(filters, favoriteIds);
+    const learningPath = this.getLearningPath(filters, favoriteIds);
 
     return {
       query: filters.query,
@@ -334,6 +369,7 @@ export class GuideService {
       noResults: results.length === 0,
       items: results,
       starterItems,
+      learningPath,
       guidanceText: getGuidanceText(filters, favoriteIds.size),
       ui: getUiText(filters.language),
       vscodeVim: this.getVscodeVimSnapshot(filters.language)
@@ -395,6 +431,30 @@ export class GuideService {
     return STARTER_ITEM_IDS.map((id) => this.itemMap.get(id))
       .filter((item): item is GuideItem => item !== undefined)
       .map((item) => this.toViewModel(item, favoriteIds, filters.language));
+  }
+
+  private getLearningPath(filters: GuideFilters, favoriteIds: ReadonlySet<string>): readonly GuideLearningPathStep[] {
+    if (filters.query.trim().length > 0 || filters.category !== ALL_CATEGORY || filters.favoritesOnly) {
+      return [];
+    }
+
+    return guideItemStages.map((stage) => {
+      const text = getLearningPathText(stage, filters.language);
+      return {
+        stage,
+        label: getStageLabel(stage, filters.language),
+        title: text.title,
+        description: text.description,
+        readinessHint: text.readinessHint,
+        focusActionLabel: text.focusActionLabel,
+        itemCount: this.items.filter((item) => item.stage === stage).length,
+        active: filters.stage === stage || (filters.stage === ALL_STAGE && stage === "beginner"),
+        focusItems: LEARNING_PATH_ITEM_IDS[stage]
+          .map((id) => this.itemMap.get(id))
+          .filter((item): item is GuideItem => item !== undefined)
+          .map((item) => this.toViewModel(item, favoriteIds, filters.language))
+      };
+    });
   }
 }
 
@@ -696,6 +756,10 @@ function getUiText(language: GuideLanguage): GuideUiText {
       categoryAriaLabel: "카테고리",
       favorites: "즐겨찾기",
       startHere: "여기서 시작",
+      learningPathTitle: "학습 경로",
+      learningPathIntro: "처음부터 모든 Vim 명령을 외우지 말고, 현재 단계의 작은 묶음만 반복하세요.",
+      focusItemsLabel: "먼저 익힐 것",
+      currentLevel: "현재 추천",
       refresh: "새로고침",
       copy: "복사",
       run: "실행",
@@ -727,6 +791,10 @@ function getUiText(language: GuideLanguage): GuideUiText {
     categoryAriaLabel: "Category",
     favorites: "Favorites",
     startHere: "Start here",
+    learningPathTitle: "Learning path",
+    learningPathIntro: "Do not memorize every Vim command at once. Practice the small set for your current level first.",
+    focusItemsLabel: "Practice first",
+    currentLevel: "Recommended now",
     refresh: "Refresh",
     copy: "Copy",
     run: "Run",
@@ -747,6 +815,61 @@ function getUiText(language: GuideLanguage): GuideUiText {
     countAriaSuffix: " guide items",
     searchStarterPrefix: "Search "
   };
+}
+
+function getLearningPathText(
+  stage: GuideItemStage,
+  language: GuideLanguage
+): Pick<GuideLearningPathStep, "title" | "description" | "readinessHint" | "focusActionLabel"> {
+  if (language === "ko") {
+    switch (stage) {
+      case "beginner":
+        return {
+          title: "1단계: 지금은 이것만 반복",
+          description: "모드 전환, 기본 이동, 줄 삭제/복사, 빠른 파일 열기만 몸에 익힙니다.",
+          readinessHint: "생각하지 않고 i, w, dd, yy, Cmd+P를 쓸 수 있으면 다음 단계로 넘어가세요.",
+          focusActionLabel: "입문만 보기"
+        };
+      case "productive":
+        return {
+          title: "2단계: 작업 속도 올리기",
+          description: "검색, 다음 결과 이동, 단어 단위 조작, register, 전체 검색을 추가합니다.",
+          readinessHint: "검색과 text object를 실제 코드 수정에 자연스럽게 쓰기 시작하면 고급으로 넘어가세요.",
+          focusActionLabel: "실무 생산성만 보기"
+        };
+      case "advanced":
+        return {
+          title: "3단계: 반복 작업 자동화",
+          description: "매크로, 창 이동, leader/remap으로 반복 작업을 줄이는 습관을 만듭니다.",
+          readinessHint: "반복 수정이나 프로젝트별 명령을 직접 묶고 싶을 때 이 단계가 효과적입니다.",
+          focusActionLabel: "고급만 보기"
+        };
+    }
+  }
+
+  switch (stage) {
+    case "beginner":
+      return {
+        title: "Step 1: Use only these for now",
+        description: "Build muscle memory for modes, basic movement, line delete/yank, and quick file open.",
+        readinessHint: "Move on when i, w, dd, yy, and Cmd+P feel automatic.",
+        focusActionLabel: "Show Beginner only"
+      };
+    case "productive":
+      return {
+        title: "Step 2: Add working-speed habits",
+        description: "Add search, next match, word text objects, registers, and workspace search.",
+        readinessHint: "Move on when search and text objects show up naturally in real edits.",
+        focusActionLabel: "Show Productive only"
+      };
+    case "advanced":
+      return {
+        title: "Step 3: Automate repeated work",
+        description: "Use macros, window movement, leader keys, and remaps to reduce repeated actions.",
+        readinessHint: "Use this when you want to bundle repeated edits or project-specific commands.",
+        focusActionLabel: "Show Advanced only"
+      };
+  }
 }
 
 function settingLabel(name: "leader" | "normal" | "visual" | "insert" | "clipboard", language: GuideLanguage): string {

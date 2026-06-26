@@ -267,6 +267,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
         .notice,
         .guidance,
         .starter,
+        .learning-path,
         .vim-summary,
         .settings {
           border: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-panel-border));
@@ -288,8 +289,81 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
           gap: 8px;
         }
 
+        .learning-path {
+          display: grid;
+          gap: 9px;
+        }
+
+        .learning-path-head {
+          display: grid;
+          gap: 2px;
+        }
+
+        .learning-path-title,
         .starter-title {
           font-weight: 650;
+        }
+
+        .learning-path-intro,
+        .path-hint,
+        .path-count {
+          color: var(--vscode-descriptionForeground);
+          font-size: 12px;
+        }
+
+        .path-list {
+          display: grid;
+          gap: 8px;
+        }
+
+        .path-card {
+          display: grid;
+          gap: 7px;
+          border: 1px solid var(--vscode-panel-border);
+          border-radius: var(--radius);
+          padding: 9px;
+          background: var(--vscode-sideBar-background);
+        }
+
+        .path-card.active {
+          border-color: var(--vscode-focusBorder);
+        }
+
+        .path-topline {
+          display: flex;
+          align-items: baseline;
+          justify-content: space-between;
+          gap: 8px;
+        }
+
+        .path-title {
+          font-weight: 650;
+          overflow-wrap: anywhere;
+        }
+
+        .path-description {
+          margin: 0;
+          overflow-wrap: anywhere;
+        }
+
+        .path-items {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 5px;
+        }
+
+        .path-chip {
+          max-width: 100%;
+          border: 1px solid var(--vscode-badge-background, var(--vscode-panel-border));
+          border-radius: 999px;
+          padding: 1px 6px;
+          color: var(--vscode-descriptionForeground);
+          background: transparent;
+          overflow-wrap: anywhere;
+        }
+
+        .path-action {
+          justify-self: start;
         }
 
         .starter-list {
@@ -505,6 +579,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
           <button class="link" id="refresh-summary" type="button">Refresh</button>
         </section>
 
+        <section class="learning-path" id="learning-path" aria-label="Learning path" hidden></section>
         <div class="guidance" id="guidance" role="status" aria-live="polite" hidden></div>
         <section class="starter" id="starter" aria-label="Start here" hidden></section>
         <div class="notice" id="notice" role="status" aria-live="polite" hidden></div>
@@ -533,6 +608,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
         const favoritesOnly = document.getElementById("favorites-only");
         const favoriteLabel = document.getElementById("favorite-label");
         const count = document.getElementById("count");
+        const learningPath = document.getElementById("learning-path");
         const guidance = document.getElementById("guidance");
         const starter = document.getElementById("starter");
         const notice = document.getElementById("notice");
@@ -592,6 +668,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
           renderStages(model);
           renderCategories(model);
           renderSettings(model.vscodeVim);
+          renderLearningPath(model);
           renderGuidance(model);
           renderStarter(model);
           renderNotice();
@@ -672,6 +749,84 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
           }
         }
 
+        function renderLearningPath(model) {
+          learningPath.replaceChildren();
+
+          if (model.learningPath.length === 0) {
+            learningPath.hidden = true;
+            return;
+          }
+
+          learningPath.hidden = false;
+          learningPath.setAttribute("aria-label", model.ui.learningPathTitle);
+
+          const head = document.createElement("div");
+          head.className = "learning-path-head";
+          const title = document.createElement("div");
+          title.className = "learning-path-title";
+          title.textContent = model.ui.learningPathTitle;
+          const intro = document.createElement("div");
+          intro.className = "learning-path-intro";
+          intro.textContent = model.ui.learningPathIntro;
+          head.append(title, intro);
+
+          const list = document.createElement("div");
+          list.className = "path-list";
+
+          for (const step of model.learningPath) {
+            const card = document.createElement("article");
+            card.className = step.active ? "path-card active" : "path-card";
+
+            const topLine = document.createElement("div");
+            topLine.className = "path-topline";
+            const stepTitle = document.createElement("div");
+            stepTitle.className = "path-title";
+            stepTitle.textContent = step.title;
+            const count = document.createElement("div");
+            count.className = "path-count";
+            count.textContent = step.label + " · " + step.itemCount;
+            topLine.append(stepTitle, count);
+
+            const description = document.createElement("p");
+            description.className = "path-description";
+            description.textContent = step.description;
+
+            const itemLabel = document.createElement("div");
+            itemLabel.className = "path-count";
+            itemLabel.textContent = step.active ? model.ui.currentLevel + " · " + model.ui.focusItemsLabel : model.ui.focusItemsLabel;
+
+            const itemList = document.createElement("div");
+            itemList.className = "path-items";
+            for (const item of step.focusItems) {
+              const chip = document.createElement("span");
+              chip.className = "path-chip";
+              chip.textContent = item.keys + " · " + item.displayTitle;
+              itemList.append(chip);
+            }
+
+            const hint = document.createElement("div");
+            hint.className = "path-hint";
+            hint.textContent = step.readinessHint;
+
+            const action = document.createElement("button");
+            action.className = "secondary path-action";
+            action.type = "button";
+            action.textContent = step.focusActionLabel;
+            action.addEventListener("click", () => {
+              searchInput.value = "";
+              categorySelect.value = "All";
+              stageSelect.value = step.stage;
+              favoritesOnly.checked = false;
+              postFilter();
+            });
+
+            card.append(topLine, description, itemLabel, itemList, hint, action);
+            list.append(card);
+          }
+
+          learningPath.append(head, list);
+        }
+
         function renderGuidance(model) {
           if (model.guidanceText.length === 0) {
             guidance.hidden = true;
@@ -686,7 +841,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
         function renderStarter(model) {
           starter.replaceChildren();
 
-          if (model.starterItems.length === 0) {
+          if (model.starterItems.length === 0 || model.learningPath.length > 0) {
             starter.hidden = true;
             return;
           }
