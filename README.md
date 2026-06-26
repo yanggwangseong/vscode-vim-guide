@@ -49,6 +49,13 @@ Package smoke uses the local `@vscode/vsce` dev dependency:
 npm run package
 ```
 
+Install or update the generated VSIX in your local VS Code profile:
+
+```sh
+npm run package
+npm run install:local
+```
+
 ## Extension Development Host
 
 Open this repository in VS Code, then press `F5` if using a launch configuration, or run:
@@ -64,6 +71,7 @@ In the Extension Development Host, verify:
 - Search and category filter update results.
 - A no-results state appears for unmatched searches.
 - Favorite toggles persist after reload.
+- Copy writes the visible guide item keys to the clipboard.
 - VSCodeVim settings panel handles installed, missing, empty, and malformed settings without failing.
 - Run buttons appear only for VS Code command entries.
 
@@ -89,6 +97,7 @@ The webview sends guide item ids to the extension host. It never sends arbitrary
 | Category filter | `GuideService` tests |
 | Empty query and no-results states | `GuideService` view model tests, `GuideViewProvider` HTML/message tests, Extension Development Host checklist |
 | Favorites add/remove and persist | `GuideService` state tests, `GuideViewProvider` message tests |
+| Copy action for guide items | `GuideViewProvider` copy message clipboard test, Extension Development Host checklist |
 | 40 to 60 Vim command/tip seed items | data count test |
 | 10 to 15 VS Code command seed items | data count test |
 | Required item fields | data schema test |
@@ -98,5 +107,6 @@ The webview sends guide item ids to the extension host. It never sends arbitrary
 | Non-executable Vim actions avoid Run buttons | data/service executable model tests |
 | Compile, lint, test pass | `npm run compile`, `npm run lint`, `npm test`, `npm run verify` |
 | Package smoke | `npm run package`, `npm run verify` |
+| Local VSIX install/update | `npm run install:local`, or `code --install-extension dist/vscode-vim-guide-0.0.1.vsix --force` |
 | README coverage | this file |
 | deep-code-review and pr-review clean | home harness workspace review reports |

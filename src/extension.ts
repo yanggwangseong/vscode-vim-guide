@@ -21,24 +21,35 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand("vimGuide.open", async () => {
-      await executeAllowlistedInternalCommand("workbench.view.extension.vimGuide");
-      try {
-        await executeAllowlistedInternalCommand(`${GuideViewProvider.viewType}.focus`);
-      } catch {
-        // Older VS Code builds may not expose a focus command for contributed webview views.
-      }
+      await openGuideView();
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("vimGuide.refresh", () => {
-      guideViewProvider.refresh();
+    vscode.commands.registerCommand("vimGuide.refresh", async () => {
+      if (guideViewProvider.refresh()) {
+        return;
+      }
+
+      await openGuideView();
+      if (!guideViewProvider.refresh()) {
+        void vscode.window.showWarningMessage("Open the Vim Guide sidebar before refreshing it.");
+      }
     })
   );
 }
 
 export function deactivate(): void {
   // VS Code disposes registered subscriptions from the extension context.
+}
+
+async function openGuideView(): Promise<void> {
+  await executeAllowlistedInternalCommand("workbench.view.extension.vimGuide");
+  try {
+    await executeAllowlistedInternalCommand(`${GuideViewProvider.viewType}.focus`);
+  } catch {
+    // Older VS Code builds may not expose a focus command for contributed webview views.
+  }
 }
 
 async function executeAllowlistedInternalCommand(command: string): Promise<void> {

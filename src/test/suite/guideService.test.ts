@@ -470,6 +470,28 @@ suite("GuideViewProvider", () => {
     assert.deepStrictEqual(state.get(FAVORITES_KEY, []), ["vim-edit-delete-line"]);
   });
 
+  test("copy messages write item keys and ignore invalid ids", async () => {
+    const previousClipboardText = await vscode.env.clipboard.readText();
+    const service = createService();
+    const provider = new GuideViewProvider(vscode.Uri.file(__dirname), service);
+    const fake = createFakeWebviewView();
+
+    try {
+      provider.resolveWebviewView(fake.view);
+      fake.webview.receive({ type: "copy", id: "vim-edit-delete-line" });
+      await flushPromises();
+      assert.strictEqual(await vscode.env.clipboard.readText(), "dd");
+
+      await vscode.env.clipboard.writeText("unchanged-copy-sentinel");
+      fake.webview.receive({ type: "copy", id: "missing-item" });
+      fake.webview.receive({ type: "copy", id: 42 });
+      await flushPromises();
+      assert.strictEqual(await vscode.env.clipboard.readText(), "unchanged-copy-sentinel");
+    } finally {
+      await vscode.env.clipboard.writeText(previousClipboardText);
+    }
+  });
+
   test("run messages use item ids and ignore arbitrary command payloads", async () => {
     const executed: string[] = [];
     const service = createService(new MemoryState(), executed);
@@ -494,12 +516,12 @@ suite("GuideViewProvider", () => {
 
     provider.resolveWebviewView(fake.view);
     fake.webview.postMessageResult = false;
-    provider.refresh();
+    assert.strictEqual(provider.refresh(), true);
     await flushPromises();
     assert.strictEqual(fake.webview.postedMessages.length, 1);
 
     fake.dispose();
-    provider.refresh();
+    assert.strictEqual(provider.refresh(), false);
     await flushPromises();
     assert.strictEqual(fake.webview.postedMessages.length, 1);
   });

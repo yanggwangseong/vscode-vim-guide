@@ -43,8 +43,13 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  public refresh(): void {
+  public refresh(): boolean {
+    if (this.view === undefined) {
+      return false;
+    }
+
     void this.postViewModel().catch((error: unknown) => this.handleMessageError(error));
+    return true;
   }
 
   private async handleMessage(message: WebviewMessage): Promise<void> {
