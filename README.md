@@ -7,7 +7,7 @@ This extension does not emulate Vim and does not replace VSCodeVim.
 ## Features
 
 - Activity Bar container and Sidebar view named `Vim Guide`.
-- 53 Vim command and productivity tip entries.
+- 57 Vim command and productivity tip entries.
 - 13 VS Code integration command entries.
 - Search across title, keys, description, category, learning stage, and tags.
 - Category and learning-stage filtering.
@@ -15,6 +15,7 @@ This extension does not emulate Vim and does not replace VSCodeVim.
 - Lesson-based curriculum for a junior developer moving from Vim basics to productive VSCodeVim use.
 - `Today's Vim practice` default view that shows the current lesson first instead of the full catalog.
 - Expandable lesson sections for survival movement, line navigation, everyday edits, search, structured edits, and automation.
+- Local lesson progress with self-check prompts, practice counts, and next-lesson flow.
 - `Show all commands` mode for users who already know the current lesson and want the full reference.
 - Empty search and no-results states.
 - Favorites stored with VS Code global extension state.
@@ -78,6 +79,7 @@ In the Extension Development Host, verify:
 - Search, learning-stage, category, and favorites-only filters update results.
 - Language selector switches between English and Korean, and Korean search terms return matching items.
 - Lesson cards expand/collapse and the active lesson shows practice instructions, readiness criteria, and focused items.
+- Mark the current lesson done, reload the window, and confirm the next lesson/progress state is preserved.
 - `Show all commands` switches from current-lesson practice to the full searchable reference.
 - A no-results state appears for unmatched searches.
 - Favorite toggles persist after reload.
@@ -107,10 +109,10 @@ The webview sends guide item ids to the extension host. It never sends arbitrary
 | Search fields covered | `GuideService` seed and fixture tests |
 | Category and learning-stage filters | `GuideService` filter tests |
 | English/Korean language selector and Korean guide copy | localization coverage tests, `GuideService` Korean search/model tests, `GuideViewProvider` message tests |
-| Lesson-based curriculum and current lesson practice | `GuideService` curriculum tests, `GuideViewProvider` HTML/model tests, Extension Development Host checklist |
+| Lesson-based curriculum and current lesson practice | `GuideService` curriculum/progress tests, `GuideViewProvider` HTML/model tests, Extension Development Host checklist |
 | Empty query and no-results states | `GuideService` view model tests, `GuideViewProvider` HTML/message tests, Extension Development Host checklist |
 | Favorites add/remove, persist, and favorites-only queue | `GuideService` state/filter tests, `GuideViewProvider` message tests |
-| Expandable lessons, current lesson, and full-reference toggle | `GuideService` curriculum tests, `GuideViewProvider` HTML/model tests, Extension Development Host checklist |
+| Expandable lessons, current lesson, progress, next lesson, and full-reference toggle | `GuideService` curriculum/progress tests, `GuideViewProvider` HTML/model tests, Extension Development Host checklist |
 | Copy action for guide items | `GuideViewProvider` copy message clipboard test, Extension Development Host checklist |
 | 40 to 60 Vim command/tip seed items | data count test |
 | 10 to 15 VS Code command seed items | data count test |

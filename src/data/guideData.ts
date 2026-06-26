@@ -28,6 +28,10 @@ export const guideItemStageOverrides: Readonly<Record<string, GuideItemStage>> =
   "vim-edit-replace-char": "productive",
   "vim-edit-join-lines": "productive",
   "vim-edit-repeat-change": "productive",
+  "vim-edit-delete-word": "productive",
+  "vim-edit-delete-to-line-end": "productive",
+  "vim-edit-change-inner-word": "productive",
+  "vim-edit-yank-inner-word": "productive",
   "vim-mode-visual-block": "advanced",
   "vim-search-forward": "productive",
   "vim-search-backward": "productive",
@@ -290,6 +294,46 @@ const guideItemSeeds: readonly GuideItemSeed[] = [
     source: "vim",
     type: "command",
     tags: ["repeat", "productivity", "normal"]
+  },
+  {
+    id: "vim-edit-delete-word",
+    title: "Delete to next word",
+    keys: "dw",
+    category: "Editing",
+    description: "Delete from the cursor through the next word motion. This is the basic operator plus motion pattern.",
+    source: "vim",
+    type: "command",
+    tags: ["delete", "word", "operator", "motion"]
+  },
+  {
+    id: "vim-edit-delete-to-line-end",
+    title: "Delete to line end",
+    keys: "d$",
+    category: "Editing",
+    description: "Delete from the cursor to the end of the current line by combining d with the line-end motion.",
+    source: "vim",
+    type: "command",
+    tags: ["delete", "line", "operator", "motion"]
+  },
+  {
+    id: "vim-edit-change-inner-word",
+    title: "Change inner word",
+    keys: "ciw",
+    category: "Editing",
+    description: "Change the current word without manually selecting it by combining c with the inner-word text object.",
+    source: "vim",
+    type: "command",
+    tags: ["change", "word", "operator", "text-object"]
+  },
+  {
+    id: "vim-edit-yank-inner-word",
+    title: "Yank inner word",
+    keys: "yiw",
+    category: "Editing",
+    description: "Copy the current word without surrounding whitespace by combining y with the inner-word text object.",
+    source: "vim",
+    type: "command",
+    tags: ["yank", "copy", "word", "operator", "text-object"]
   },
   {
     id: "vim-mode-normal",

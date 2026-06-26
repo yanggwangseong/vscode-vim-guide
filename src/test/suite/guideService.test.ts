@@ -12,6 +12,7 @@ import {
   GuideViewModel,
   GuideService,
   LANGUAGE_KEY,
+  LEARNING_STATE_KEY,
   StateStore,
   parseVscodeVimConfig
 } from "../../services/guideService";
@@ -131,9 +132,9 @@ suite("guide data", () => {
     const vimLikeCount = guideItems.filter((item) => item.source !== "vscode").length;
     const vscodeCommandCount = guideItems.filter((item) => item.type === "vscode-command").length;
 
-    assert.strictEqual(vimLikeCount, 53);
+    assert.strictEqual(vimLikeCount, 57);
     assert.strictEqual(vscodeCommandCount, 13);
-    assert.strictEqual(guideItems.length, 66);
+    assert.strictEqual(guideItems.length, 70);
   });
 
   test("has stable ids and required fields", () => {
@@ -187,8 +188,10 @@ suite("guide data", () => {
       assert.ok(lesson.description.length > 0, `lesson description is required for ${lesson.id}`);
       assert.ok(lesson.practicePrompt.length > 0, `lesson practice prompt is required for ${lesson.id}`);
       assert.ok(lesson.readinessHint.length > 0, `lesson readiness hint is required for ${lesson.id}`);
+      assert.ok(lesson.checklist.length >= 4, `lesson self-checklist is required for ${lesson.id}`);
       assert.ok(lesson.itemIds.length >= 7, `lesson should include enough practice items: ${lesson.id}`);
       assert.ok(koreanGuideLessonText[lesson.id], `missing Korean lesson localization for ${lesson.id}`);
+      assert.strictEqual(koreanGuideLessonText[lesson.id]?.checklist.length, lesson.checklist.length);
       for (const itemId of lesson.itemIds) {
         assert.ok(ids.has(itemId), `lesson ${lesson.id} references an unknown item: ${itemId}`);
       }
@@ -220,6 +223,7 @@ suite("GuideService", () => {
     assert.ok(service.searchItems("workspace-wide", ALL_CATEGORY).some((item) => item.id === "vscode-command-find-files"));
     assert.ok(service.searchItems("Text Objects", ALL_CATEGORY).some((item) => item.id === "vim-text-object-inner-word"));
     assert.ok(service.searchItems("quick-open", ALL_CATEGORY).some((item) => item.id === "vscode-command-quick-open"));
+    assert.ok(service.searchItems("operator plus motion", ALL_CATEGORY).some((item) => item.id === "vim-edit-delete-word"));
   });
 
   test("searches each field with isolated fixture tokens", () => {
@@ -338,6 +342,10 @@ suite("GuideService", () => {
     assert.strictEqual(defaultModel.currentLesson?.id, DEFAULT_GUIDE_LESSON_ID);
     assert.strictEqual(defaultModel.currentLesson?.active, true);
     assert.strictEqual(defaultModel.currentLesson?.initiallyOpen, true);
+    assert.strictEqual(defaultModel.currentLesson?.completed, false);
+    assert.strictEqual(defaultModel.currentLesson?.practiceCount, 0);
+    assert.strictEqual(defaultModel.currentLesson?.progressLabel, "아직 연습 전");
+    assert.ok(defaultModel.currentLesson?.checklist.some((item) => item.includes("Normal mode")));
     assert.deepStrictEqual(
       defaultModel.items.map((item) => item.id),
       defaultModel.currentLesson?.items.map((item) => item.id)
@@ -354,6 +362,53 @@ suite("GuideService", () => {
     assert.ok(searchModel.items.some((item) => item.id === "vim-edit-delete-line"));
     assert.strictEqual(allModel.viewMode, "all");
     assert.strictEqual(allModel.resultCount, guideItems.length);
+    assert.ok(defaultModel.lessons.some((lesson) => lesson.id === "lesson-operator-grammar"));
+  });
+
+  test("persists learning focus and advances completed lessons", async () => {
+    const state = new MemoryState();
+    const service = createService(state);
+
+    await service.setLearningFocus("lesson-line-navigation", "all");
+    let reloaded = createService(state);
+    let model = reloaded.createViewModel();
+    assert.strictEqual(model.lesson, "lesson-line-navigation");
+    assert.strictEqual(model.viewMode, "all");
+
+    const nextLessonId = await reloaded.completeLesson("lesson-line-navigation");
+    assert.strictEqual(nextLessonId, "lesson-basic-edits");
+    reloaded = createService(state);
+    model = reloaded.createViewModel();
+    const completedLesson = model.lessons.find((lesson) => lesson.id === "lesson-line-navigation");
+    assert.strictEqual(model.lesson, "lesson-basic-edits");
+    assert.strictEqual(model.viewMode, "practice");
+    assert.strictEqual(model.completedLessonCount, 1);
+    assert.strictEqual(completedLesson?.completed, true);
+    assert.strictEqual(completedLesson?.practiceCount, 1);
+    assert.ok(completedLesson?.lastPracticedAt);
+  });
+
+  test("normalizes malformed learning state", async () => {
+    const state = new MemoryState();
+    state.set(LEARNING_STATE_KEY, {
+      currentLessonId: "missing-lesson",
+      viewMode: "bad-mode",
+      completedLessonIds: ["lesson-basic-edits", "missing-lesson", "lesson-basic-edits"],
+      practiceCounts: { "lesson-basic-edits": 2, "missing-lesson": 5, "lesson-search-workflow": -1 },
+      lastPracticedAt: { "lesson-basic-edits": "2026-06-26T00:00:00.000Z", "missing-lesson": "bad" }
+    });
+    const service = createService(state);
+    const learningState = service.getLearningState();
+
+    assert.deepStrictEqual(learningState, {
+      currentLessonId: DEFAULT_GUIDE_LESSON_ID,
+      viewMode: "practice",
+      completedLessonIds: ["lesson-basic-edits"],
+      practiceCounts: { "lesson-basic-edits": 2 },
+      lastPracticedAt: { "lesson-basic-edits": "2026-06-26T00:00:00.000Z" }
+    });
+    await flushPromises();
+    assert.deepStrictEqual(state.get(LEARNING_STATE_KEY, {}), learningState);
   });
 
   test("persists display language through state", async () => {
@@ -412,7 +467,7 @@ suite("GuideService", () => {
     assert.strictEqual(model.language, "en");
     assert.strictEqual(model.viewMode, "practice");
     assert.strictEqual(model.lesson, DEFAULT_GUIDE_LESSON_ID);
-    assert.strictEqual(model.totalCount, 66);
+    assert.strictEqual(model.totalCount, 70);
     assert.strictEqual(model.resultCount, model.currentLesson?.items.length);
   });
 
@@ -620,8 +675,11 @@ suite("GuideViewProvider", () => {
     assert.ok(fake.webview.html.includes('id="favorites-only"'));
     assert.ok(fake.webview.html.includes('showAll.id = "show-all"'));
     assert.ok(fake.webview.html.includes("renderCurriculum"));
-    assert.ok(fake.webview.html.includes("renderLesson"));
-    assert.ok(fake.webview.html.includes(".lesson-card"));
+    assert.ok(fake.webview.html.includes("renderTodayLesson"));
+    assert.ok(fake.webview.html.includes("renderLessonMap"));
+    assert.ok(fake.webview.html.includes("completeLesson"));
+    assert.ok(fake.webview.html.includes(".today-card"));
+    assert.ok(fake.webview.html.includes(".lesson-nav"));
     assert.ok(fake.webview.html.includes('id="vim-summary-status"'));
     assert.ok(fake.webview.html.includes('id="settings-list"'));
     assert.ok(fake.webview.html.includes('id="results"'));
@@ -632,7 +690,7 @@ suite("GuideViewProvider", () => {
     assert.ok(fake.webview.html.includes('"setting-value status-"'));
     assert.ok(fake.webview.html.includes("describeNoResults"));
     assert.ok(fake.webview.html.includes("model.ui.favorites"));
-    assert.ok(fake.webview.html.includes('"totalCount":66'));
+    assert.ok(fake.webview.html.includes('"totalCount":70'));
     assert.ok(fake.webview.html.includes('"label":"한국어"'));
     assert.ok(fake.webview.html.indexOf('id="curriculum"') < fake.webview.html.indexOf('id="controls"'));
     assert.ok(fake.webview.html.indexOf('id="results"') < fake.webview.html.indexOf('class="settings"'));
@@ -649,7 +707,7 @@ suite("GuideViewProvider", () => {
     await flushPromises();
 
     let model = latestViewModel(fake.webview);
-    assert.strictEqual(model.totalCount, 66);
+    assert.strictEqual(model.totalCount, 70);
     assert.strictEqual(model.viewMode, "practice");
     assert.strictEqual(model.currentLesson?.id, DEFAULT_GUIDE_LESSON_ID);
     assert.strictEqual(model.resultCount, model.currentLesson?.items.length);
@@ -718,6 +776,17 @@ suite("GuideViewProvider", () => {
     assert.strictEqual(model.viewMode, "practice");
     assert.strictEqual(model.currentLesson?.id, "lesson-line-navigation");
     assert.ok(model.items.some((item) => item.id === "vim-motion-line-column-start"));
+
+    fake.webview.receive({ type: "completeLesson", id: "lesson-line-navigation" });
+    await flushPromises();
+    model = latestViewModel(fake.webview);
+    assert.strictEqual(model.currentLesson?.id, "lesson-basic-edits");
+    assert.strictEqual(model.completedLessonCount, 1);
+    assert.strictEqual(model.lessons.find((lesson) => lesson.id === "lesson-line-navigation")?.completed, true);
+    assert.strictEqual(
+      (state.get(LEARNING_STATE_KEY, {}) as { readonly currentLessonId?: unknown }).currentLessonId,
+      "lesson-basic-edits"
+    );
   });
 
   test("copy messages write item keys and ignore invalid ids", async () => {

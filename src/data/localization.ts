@@ -21,6 +21,7 @@ export interface GuideLessonLocalizedText {
   readonly description: string;
   readonly practicePrompt: string;
   readonly readinessHint: string;
+  readonly checklist: readonly string[];
 }
 
 export const guideLanguageOptions: readonly GuideLanguageOption[] = [
@@ -120,6 +121,22 @@ export const koreanGuideItemText: Readonly<Record<string, GuideItemLocalizedText
   "vim-edit-repeat-change": {
     title: "마지막 변경 반복",
     description: "방금 수행한 변경을 현재 위치에도 반복합니다. 같은 편집을 여러 곳에 적용할 때 유용합니다."
+  },
+  "vim-edit-delete-word": {
+    title: "다음 단어까지 삭제",
+    description: "d operator와 단어 이동을 조합해 커서 위치부터 다음 단어까지 삭제합니다. operator와 motion 조합의 기본 패턴입니다."
+  },
+  "vim-edit-delete-to-line-end": {
+    title: "줄 끝까지 삭제",
+    description: "d와 줄 끝 이동을 조합해 커서 위치부터 현재 줄 끝까지 삭제합니다."
+  },
+  "vim-edit-change-inner-word": {
+    title: "현재 단어 바꾸기",
+    description: "c와 inner-word text object를 조합해 현재 단어를 직접 선택하지 않고 바로 바꿉니다."
+  },
+  "vim-edit-yank-inner-word": {
+    title: "현재 단어 복사",
+    description: "y와 inner-word text object를 조합해 주변 공백 없이 현재 단어만 복사합니다."
   },
   "vim-mode-normal": {
     title: "Normal mode로 돌아가기",
@@ -300,37 +317,85 @@ export const koreanGuideLessonText: Readonly<Record<string, GuideLessonLocalized
     title: "생존 루프: 이동, 입력, 저장",
     description: "Vim이 아직 불안할 때 여기서 시작하세요. 이동하고, 입력하고, 저장하고, 닫는 데 필요한 키만 익힙니다.",
     practicePrompt: "아무 파일이나 열고 Esc를 누른 뒤 h/j/k/l로 움직이고, i나 A로 입력한 다음 Cmd+S로 저장해 보세요.",
-    readinessHint: "Esc, h/j/k/l, i, A, Cmd+S, Cmd+W를 검색하지 않고 쓸 수 있으면 다음 레슨으로 넘어가세요."
+    readinessHint: "Esc, h/j/k/l, i, A, Cmd+S, Cmd+W를 검색하지 않고 쓸 수 있으면 다음 레슨으로 넘어가세요.",
+    checklist: [
+      "생각하지 않고 Normal mode로 돌아온다.",
+      "마우스 없이 다섯 줄, 다섯 글자 이상 이동한다.",
+      "커서 위치와 줄 끝에 텍스트를 추가한다.",
+      "키보드로 저장하고 에디터를 닫는다."
+    ]
   },
   "lesson-line-navigation": {
     title: "줄과 파일 안에서 이동",
     description: "코드를 읽을 때 계속 쓰는 이동을 추가합니다. 단어, 줄의 양 끝, 파일 처음/끝, 줄 번호 이동입니다.",
-    practicePrompt: "실제 소스 파일에서 w/b/e로 단어를 이동하고 0/^/$, gg/G, 줄 번호 이동을 차례대로 써 보세요.",
-    readinessHint: "마우스 없이 줄 끝이나 원하는 줄 번호에 도달할 수 있으면 다음 레슨으로 넘어가세요."
+    practicePrompt: "실제 소스 파일에서 w/b/e로 단어를 이동하고 0/^/$, gg/G, 줄 번호 이동과 파일 빠른 열기를 차례대로 써 보세요.",
+    readinessHint: "마우스 없이 줄 끝이나 원하는 줄 번호에 도달할 수 있으면 다음 레슨으로 넘어가세요.",
+    checklist: [
+      "화살표를 오래 누르지 않고 단어 단위로 이동한다.",
+      "0, ^, $로 줄의 양 끝에 도달한다.",
+      "파일 처음, 끝, 특정 줄 번호로 이동한다.",
+      "파일 탐색기를 건드리지 않고 파일 이름으로 연다."
+    ]
   },
   "lesson-basic-edits": {
     title: "매일 쓰는 편집 루프",
     description: "마우스 선택을 대부분 대체하는 편집을 익힙니다. 줄 열기, 삭제, 변경, 복사, 붙여넣기, 되돌리기입니다.",
     practicePrompt: "yy 다음 p로 줄을 복제하고, dd로 삭제하고, cc로 다시 쓰고, u/Ctrl+r로 되돌리기와 다시 실행을 연습하세요.",
-    readinessHint: "줄 복사/삭제/붙여넣기와 되돌리기를 실제 작업에서 안전하게 쓸 수 있으면 다음 레슨으로 넘어가세요."
+    readinessHint: "줄 복사/삭제/붙여넣기와 되돌리기를 실제 작업에서 안전하게 쓸 수 있으면 다음 레슨으로 넘어가세요.",
+    checklist: [
+      "현재 줄 위와 아래에 새 줄을 연다.",
+      "줄을 선택하지 않고 복제한다.",
+      "줄을 삭제하고 다시 작성한다.",
+      "되돌리기와 다시 실행으로 안전하게 복구한다."
+    ]
   },
   "lesson-search-workflow": {
     title: "코드 빠르게 찾기",
     description: "현재 파일은 Vim 검색으로, 프로젝트 전체는 VS Code 검색으로 빠르게 이동합니다.",
     practicePrompt: "/로 파일 안을 검색하고 n/N으로 이동한 뒤, *로 커서 아래 단어를 찾고 전체 검색을 열어 보세요.",
-    readinessHint: "스크롤로 훑는 것보다 검색이 더 빠르게 느껴지면 다음 레슨으로 넘어가세요."
+    readinessHint: "스크롤로 훑는 것보다 검색이 더 빠르게 느껴지면 다음 레슨으로 넘어가세요.",
+    checklist: [
+      "스크롤 없이 파일 안에서 검색한다.",
+      "검색 결과를 앞뒤로 이동한다.",
+      "커서 아래 단어를 바로 검색한다.",
+      "프로젝트 전체에서 심볼이나 문자열을 검색한다."
+    ]
+  },
+  "lesson-operator-grammar": {
+    title: "operator 문법: 모양대로 편집",
+    description: "Vim 속도를 여는 핵심 패턴인 operator와 motion/text object 조합을 익힙니다.",
+    practicePrompt: "실제 코드 한 줄에서 dw, d$, ciw, yiw를 연습하고, 성공한 편집 하나를 .으로 반복하세요.",
+    readinessHint: "d/c/y와 이동 또는 text object가 하나의 동작처럼 느껴지면 다음 레슨으로 넘어가세요.",
+    checklist: [
+      "명령 하나로 단어를 삭제한다.",
+      "커서부터 줄 끝까지 삭제한다.",
+      "단어를 선택하지 않고 통째로 바꾼다.",
+      "성공한 편집을 dot 명령으로 반복한다."
+    ]
   },
   "lesson-structured-edits": {
     title: "구조 단위 편집",
     description: "text object, register, 반복, 작은 교체/줄 합치기를 추가해 실제 코드 수정 속도를 올립니다.",
     practicePrompt: "operator와 iw/aw로 단어를 바꾸고, .으로 변경을 반복하고, 필요할 때만 clipboard register를 사용하세요.",
-    readinessHint: "text object가 마우스로 드래그하는 선택보다 자연스럽게 느껴지면 다음 레슨으로 넘어가세요."
+    readinessHint: "text object가 마우스로 드래그하는 선택보다 자연스럽게 느껴지면 다음 레슨으로 넘어가세요.",
+    checklist: [
+      "필요한 텍스트를 덮어쓰지 않고 register를 사용한다.",
+      "Insert mode 없이 문자 하나를 바꾼다.",
+      "공백을 직접 지우지 않고 줄을 합친다.",
+      "이전 편집 위치로 돌아간다."
+    ]
   },
   "lesson-automation-workspace": {
     title: "자동화와 작업 공간 흐름",
     description: "기본 편집 루프가 익숙해진 뒤 매크로, 창 이동, leader, remap으로 반복 작업을 줄입니다.",
     practicePrompt: "반복 가능한 수정 하나를 매크로로 기록해 다시 실행하고, split 사이를 이동하며 어떤 remap이 필요한지 점검하세요.",
-    readinessHint: "기본 이동이 아니라 반복 수정이나 프로젝트 명령이 병목일 때 이 단계가 효과적입니다."
+    readinessHint: "기본 이동이 아니라 반복 수정이나 프로젝트 명령이 병목일 때 이 단계가 효과적입니다.",
+    checklist: [
+      "작은 반복 편집을 기록하고 다시 실행한다.",
+      "키보드로 editor split 사이를 이동한다.",
+      "leader 뒤에 둘 만한 명령 하나를 찾는다.",
+      "설정을 자동 변경하지 않고 VSCodeVim remap을 검토한다."
+    ]
   }
 };
 
@@ -372,7 +437,8 @@ export function getGuideLessonText(lesson: GuideLesson, language: GuideLanguage)
         title: lesson.title,
         description: lesson.description,
         practicePrompt: lesson.practicePrompt,
-        readinessHint: lesson.readinessHint
+        readinessHint: lesson.readinessHint,
+        checklist: lesson.checklist
       }
     );
   }
@@ -381,7 +447,8 @@ export function getGuideLessonText(lesson: GuideLesson, language: GuideLanguage)
     title: lesson.title,
     description: lesson.description,
     practicePrompt: lesson.practicePrompt,
-    readinessHint: lesson.readinessHint
+    readinessHint: lesson.readinessHint,
+    checklist: lesson.checklist
   };
 }
 

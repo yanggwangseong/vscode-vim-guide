@@ -17,6 +17,7 @@ export const ALL_CATEGORY = "All";
 export const ALL_STAGE = "All";
 export const FAVORITES_KEY = "vimGuide.favoriteIds.v1";
 export const LANGUAGE_KEY = "vimGuide.language.v1";
+export const LEARNING_STATE_KEY = "vimGuide.learningState.v1";
 const MAX_BINDING_ENTRIES_TO_INSPECT = 100;
 const MAX_BINDING_SAMPLES = 3;
 const MAX_SUMMARY_TEXT_LENGTH = 80;
@@ -79,14 +80,29 @@ export interface GuideLessonViewModel {
   readonly description: string;
   readonly practicePrompt: string;
   readonly readinessHint: string;
+  readonly checklist: readonly string[];
+  readonly nextLessonId?: string;
+  readonly nextLessonTitle?: string;
   readonly itemCount: number;
   readonly active: boolean;
   readonly initiallyOpen: boolean;
+  readonly completed: boolean;
+  readonly practiceCount: number;
+  readonly lastPracticedAt?: string;
+  readonly progressLabel: string;
   readonly items: readonly GuideItemViewModel[];
 }
 
 export type GuideStageFilter = typeof ALL_STAGE | GuideItemStage;
 export type GuideViewMode = "practice" | "all";
+
+export interface GuideLearningState {
+  readonly currentLessonId: string;
+  readonly viewMode: GuideViewMode;
+  readonly completedLessonIds: readonly string[];
+  readonly practiceCounts: Readonly<Record<string, number>>;
+  readonly lastPracticedAt: Readonly<Record<string, string>>;
+}
 
 export interface GuideStageOption {
   readonly id: GuideStageFilter;
@@ -135,10 +151,21 @@ export interface GuideUiText {
   readonly lessonItemsLabel: string;
   readonly practiceThisLesson: string;
   readonly practicingNow: string;
+  readonly todayPracticeTitle: string;
+  readonly checklistLabel: string;
+  readonly completeAndNext: string;
+  readonly markLessonDone: string;
+  readonly lessonMapTitle: string;
+  readonly lessonDetailsLabel: string;
+  readonly completedBadge: string;
   readonly showAllCommands: string;
   readonly practiceModeLabel: string;
   readonly referenceModeLabel: string;
   readonly resultsTitle: string;
+  readonly copyTitle: string;
+  readonly runTitle: string;
+  readonly addFavoriteTitle: string;
+  readonly removeFavoriteTitle: string;
   readonly focusItemsLabel: string;
   readonly currentLevel: string;
   readonly refresh: string;
@@ -183,6 +210,8 @@ export interface GuideViewModel {
   readonly items: readonly GuideItemViewModel[];
   readonly lessons: readonly GuideLessonViewModel[];
   readonly currentLesson?: GuideLessonViewModel;
+  readonly completedLessonCount: number;
+  readonly lessonCount: number;
   readonly guidanceText: string;
   readonly ui: GuideUiText;
   readonly vscodeVim: VscodeVimSnapshot;
@@ -222,6 +251,7 @@ interface ArraySummary {
 
 export class GuideService {
   private readonly itemMap: Map<string, GuideItem>;
+  private readonly lessonMap: Map<string, GuideLesson>;
   private readonly configurationReader: () => ConfigurationReader;
   private readonly extensionInstalled: () => boolean;
   private readonly executeCommandImpl: (command: string) => Thenable<unknown>;
@@ -232,6 +262,7 @@ export class GuideService {
     options: GuideServiceOptions = {}
   ) {
     this.itemMap = new Map(items.map((item) => [item.id, item]));
+    this.lessonMap = new Map(guideLessons.map((lesson) => [lesson.id, lesson]));
     this.configurationReader = options.configurationReader ?? (() => vscode.workspace.getConfiguration("vim"));
     this.extensionInstalled = options.extensionInstalled ?? (() => vscode.extensions.getExtension("vscodevim.vim") !== undefined);
     this.executeCommandImpl = options.executeCommand ?? ((command) => vscode.commands.executeCommand(command));
@@ -277,6 +308,62 @@ export class GuideService {
 
   public async setLanguage(language: GuideLanguage): Promise<void> {
     await this.state.update(LANGUAGE_KEY, language);
+  }
+
+  public getLearningState(): GuideLearningState {
+    const stored = this.state.get<unknown>(LEARNING_STATE_KEY, {});
+    const learningState = normalizeLearningState(stored);
+
+    if (!learningStateStorageMatches(stored, learningState)) {
+      void this.state.update(LEARNING_STATE_KEY, learningState).then(undefined, () => {
+        // Keep rendering resilient even if storage cleanup fails.
+      });
+    }
+
+    return learningState;
+  }
+
+  public async setLearningFocus(lessonId: string, viewMode: GuideViewMode): Promise<void> {
+    const state = this.getLearningState();
+    const lesson = this.lessonMap.get(lessonId) ?? this.lessonMap.get(DEFAULT_GUIDE_LESSON_ID);
+    if (lesson === undefined) {
+      return;
+    }
+
+    await this.state.update(LEARNING_STATE_KEY, {
+      ...state,
+      currentLessonId: lesson.id,
+      viewMode
+    });
+  }
+
+  public async completeLesson(lessonId: string): Promise<string | undefined> {
+    const lesson = this.lessonMap.get(lessonId);
+    if (lesson === undefined) {
+      return undefined;
+    }
+
+    const state = this.getLearningState();
+    const nextLessonId = lesson.nextLessonId !== undefined && this.lessonMap.has(lesson.nextLessonId) ? lesson.nextLessonId : lesson.id;
+    const completedLessonIds = orderedLessonIds(new Set([...state.completedLessonIds, lesson.id]));
+    const practiceCounts = {
+      ...state.practiceCounts,
+      [lesson.id]: (state.practiceCounts[lesson.id] ?? 0) + 1
+    };
+    const lastPracticedAt = {
+      ...state.lastPracticedAt,
+      [lesson.id]: new Date().toISOString()
+    };
+
+    await this.state.update(LEARNING_STATE_KEY, {
+      currentLessonId: nextLessonId,
+      viewMode: "practice",
+      completedLessonIds,
+      practiceCounts,
+      lastPracticedAt
+    });
+
+    return nextLessonId;
   }
 
   public getFavoriteIds(): readonly string[] {
@@ -338,9 +425,11 @@ export class GuideService {
   }
 
   public createViewModel(queryOrFilters: string | GuideFilterInput = "", category = ALL_CATEGORY): GuideViewModel {
+    const learningState = this.getLearningState();
     const normalizedFilters = normalizeGuideFilters(
       typeof queryOrFilters === "string" ? { query: queryOrFilters, category } : queryOrFilters,
-      this.getLanguage()
+      this.getLanguage(),
+      learningState
     );
     const currentLesson = this.resolveCurrentLesson(normalizedFilters.lesson, normalizedFilters.stage);
     const filters: GuideFilters = { ...normalizedFilters, lesson: currentLesson.id };
@@ -348,7 +437,7 @@ export class GuideService {
     const referenceResults = this.searchItems(filters)
       .filter((item) => !filters.favoritesOnly || favoriteIds.has(item.id))
       .map((item) => this.toViewModel(item, favoriteIds, filters.language));
-    const lessons = this.getLessons(filters, favoriteIds);
+    const lessons = this.getLessons(filters, favoriteIds, learningState);
     const currentLessonModel = lessons.find((lesson) => lesson.id === currentLesson.id);
     const results = shouldUsePracticeResults(filters) ? currentLessonModel?.items ?? [] : referenceResults;
 
@@ -373,6 +462,8 @@ export class GuideService {
       items: results,
       lessons,
       currentLesson: currentLessonModel,
+      completedLessonCount: learningState.completedLessonIds.length,
+      lessonCount: guideLessons.length,
       guidanceText: getGuidanceText(filters, favoriteIds.size),
       ui: getUiText(filters.language),
       vscodeVim: this.getVscodeVimSnapshot(filters.language)
@@ -421,10 +512,19 @@ export class GuideService {
     };
   }
 
-  private getLessons(filters: GuideFilters, favoriteIds: ReadonlySet<string>): readonly GuideLessonViewModel[] {
+  private getLessons(
+    filters: GuideFilters,
+    favoriteIds: ReadonlySet<string>,
+    learningState: GuideLearningState
+  ): readonly GuideLessonViewModel[] {
+    const completedIds = new Set(learningState.completedLessonIds);
     return guideLessons.map((lesson) => {
       const text = getGuideLessonText(lesson, filters.language);
       const active = lesson.id === filters.lesson;
+      const nextLesson = lesson.nextLessonId !== undefined ? this.lessonMap.get(lesson.nextLessonId) : undefined;
+      const nextLessonText = nextLesson !== undefined ? getGuideLessonText(nextLesson, filters.language) : undefined;
+      const practiceCount = learningState.practiceCounts[lesson.id] ?? 0;
+      const completed = completedIds.has(lesson.id);
       return {
         id: lesson.id,
         stage: lesson.stage,
@@ -433,9 +533,16 @@ export class GuideService {
         description: text.description,
         practicePrompt: text.practicePrompt,
         readinessHint: text.readinessHint,
+        checklist: text.checklist,
+        nextLessonId: nextLesson?.id,
+        nextLessonTitle: nextLessonText?.title,
         itemCount: lesson.itemIds.length,
         active,
         initiallyOpen: active,
+        completed,
+        practiceCount,
+        lastPracticedAt: learningState.lastPracticedAt[lesson.id],
+        progressLabel: getLessonProgressLabel(completed, practiceCount, filters.language),
         items: lesson.itemIds
           .map((id) => this.itemMap.get(id))
           .filter((item): item is GuideItem => item !== undefined)
@@ -445,7 +552,7 @@ export class GuideService {
   }
 
   private resolveCurrentLesson(lessonId: string, stage: GuideStageFilter): GuideLesson {
-    const requestedLesson = guideLessons.find((lesson) => lesson.id === lessonId);
+    const requestedLesson = this.lessonMap.get(lessonId);
     if (requestedLesson !== undefined && (stage === ALL_STAGE || requestedLesson.stage === stage)) {
       return requestedLesson;
     }
@@ -457,7 +564,7 @@ export class GuideService {
       }
     }
 
-    const defaultLesson = guideLessons.find((lesson) => lesson.id === DEFAULT_GUIDE_LESSON_ID) ?? guideLessons[0];
+    const defaultLesson = this.lessonMap.get(DEFAULT_GUIDE_LESSON_ID) ?? guideLessons[0];
     if (defaultLesson === undefined) {
       throw new Error("Vim Guide has no curriculum lessons configured.");
     }
@@ -466,15 +573,19 @@ export class GuideService {
   }
 }
 
-export function normalizeGuideFilters(input: GuideFilterInput = {}, fallbackLanguage: GuideLanguage = "en"): GuideFilters {
+export function normalizeGuideFilters(
+  input: GuideFilterInput = {},
+  fallbackLanguage: GuideLanguage = "en",
+  fallbackLearningState: Pick<GuideLearningState, "currentLessonId" | "viewMode"> = defaultLearningState()
+): GuideFilters {
   return {
     query: typeof input.query === "string" ? input.query : "",
     category: typeof input.category === "string" && input.category.trim().length > 0 ? input.category : ALL_CATEGORY,
     stage: isGuideStageFilter(input.stage) ? input.stage : ALL_STAGE,
     favoritesOnly: input.favoritesOnly === true,
     language: isGuideLanguage(input.language) ? input.language : fallbackLanguage,
-    viewMode: isGuideViewMode(input.viewMode) ? input.viewMode : "practice",
-    lesson: typeof input.lesson === "string" && input.lesson.trim().length > 0 ? input.lesson : DEFAULT_GUIDE_LESSON_ID
+    viewMode: isGuideViewMode(input.viewMode) ? input.viewMode : fallbackLearningState.viewMode,
+    lesson: typeof input.lesson === "string" && input.lesson.trim().length > 0 ? input.lesson : fallbackLearningState.currentLessonId
   };
 }
 
@@ -493,6 +604,96 @@ function shouldUsePracticeResults(filters: GuideFilters): boolean {
     filters.category === ALL_CATEGORY &&
     !filters.favoritesOnly
   );
+}
+
+function defaultLearningState(): GuideLearningState {
+  return {
+    currentLessonId: DEFAULT_GUIDE_LESSON_ID,
+    viewMode: "practice",
+    completedLessonIds: [],
+    practiceCounts: {},
+    lastPracticedAt: {}
+  };
+}
+
+function normalizeLearningState(stored: unknown): GuideLearningState {
+  const defaults = defaultLearningState();
+  if (!isRecord(stored)) {
+    return defaults;
+  }
+
+  const validLessonIds = new Set(guideLessons.map((lesson) => lesson.id));
+  const currentLessonId = typeof stored.currentLessonId === "string" && validLessonIds.has(stored.currentLessonId) ? stored.currentLessonId : defaults.currentLessonId;
+  const viewMode = isGuideViewMode(stored.viewMode) ? stored.viewMode : defaults.viewMode;
+  const completedSet = new Set(
+    Array.isArray(stored.completedLessonIds)
+      ? stored.completedLessonIds.filter((id): id is string => typeof id === "string" && validLessonIds.has(id))
+      : []
+  );
+  const practiceCounts = normalizeLessonNumberRecord(stored.practiceCounts, validLessonIds);
+  const lastPracticedAt = normalizeLessonStringRecord(stored.lastPracticedAt, validLessonIds);
+
+  return {
+    currentLessonId,
+    viewMode,
+    completedLessonIds: orderedLessonIds(completedSet),
+    practiceCounts,
+    lastPracticedAt
+  };
+}
+
+function normalizeLessonNumberRecord(value: unknown, validLessonIds: ReadonlySet<string>): Record<string, number> {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const normalized: Record<string, number> = {};
+  for (const [id, count] of Object.entries(value)) {
+    if (validLessonIds.has(id) && typeof count === "number" && Number.isInteger(count) && count > 0) {
+      normalized[id] = count;
+    }
+  }
+
+  return normalized;
+}
+
+function normalizeLessonStringRecord(value: unknown, validLessonIds: ReadonlySet<string>): Record<string, string> {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const normalized: Record<string, string> = {};
+  for (const [id, text] of Object.entries(value)) {
+    if (validLessonIds.has(id) && typeof text === "string" && text.trim().length > 0) {
+      normalized[id] = text;
+    }
+  }
+
+  return normalized;
+}
+
+function orderedLessonIds(ids: ReadonlySet<string>): readonly string[] {
+  return guideLessons.map((lesson) => lesson.id).filter((id) => ids.has(id));
+}
+
+function learningStateStorageMatches(stored: unknown, learningState: GuideLearningState): boolean {
+  return JSON.stringify(stored) === JSON.stringify(learningState);
+}
+
+function getLessonProgressLabel(completed: boolean, practiceCount: number, language: GuideLanguage): string {
+  if (language === "ko") {
+    if (completed) {
+      return practiceCount > 1 ? `완료 · ${practiceCount}회 연습` : "완료";
+    }
+
+    return practiceCount > 0 ? `${practiceCount}회 연습` : "아직 연습 전";
+  }
+
+  if (completed) {
+    return practiceCount > 1 ? `Done · practiced ${practiceCount} times` : "Done";
+  }
+
+  return practiceCount > 0 ? `Practiced ${practiceCount} time${practiceCount === 1 ? "" : "s"}` : "Not practiced yet";
 }
 
 export function parseVscodeVimConfig(
@@ -795,10 +996,21 @@ function getUiText(language: GuideLanguage): GuideUiText {
       lessonItemsLabel: "이 레슨에서 볼 항목",
       practiceThisLesson: "이 레슨 연습",
       practicingNow: "연습 중",
+      todayPracticeTitle: "오늘 10분 연습",
+      checklistLabel: "자기점검",
+      completeAndNext: "오늘 완료하고 다음 레슨",
+      markLessonDone: "오늘 연습 완료",
+      lessonMapTitle: "전체 학습 경로",
+      lessonDetailsLabel: "명령 카드 자세히 보기",
+      completedBadge: "완료",
       showAllCommands: "전체 명령 보기",
       practiceModeLabel: "연습 모드",
-      referenceModeLabel: "전체 reference",
+      referenceModeLabel: "전체 명령 참고",
       resultsTitle: "표시 중인 항목",
+      copyTitle: "키 복사",
+      runTitle: "VS Code 명령 실행",
+      addFavoriteTitle: "즐겨찾기에 추가",
+      removeFavoriteTitle: "즐겨찾기에서 제거",
       focusItemsLabel: "먼저 익힐 것",
       currentLevel: "현재 추천",
       refresh: "새로고침",
@@ -840,10 +1052,21 @@ function getUiText(language: GuideLanguage): GuideUiText {
     lessonItemsLabel: "Lesson items",
     practiceThisLesson: "Practice this lesson",
     practicingNow: "Practicing",
+    todayPracticeTitle: "Today's 10-minute practice",
+    checklistLabel: "Self-check",
+    completeAndNext: "Mark done and go next",
+    markLessonDone: "Mark practice done",
+    lessonMapTitle: "Full learning path",
+    lessonDetailsLabel: "Show command cards",
+    completedBadge: "Done",
     showAllCommands: "Show all commands",
     practiceModeLabel: "Practice mode",
     referenceModeLabel: "Full reference",
     resultsTitle: "Visible items",
+    copyTitle: "Copy keys",
+    runTitle: "Run VS Code command",
+    addFavoriteTitle: "Add to favorites",
+    removeFavoriteTitle: "Remove from favorites",
     focusItemsLabel: "Practice first",
     currentLevel: "Recommended now",
     refresh: "Refresh",

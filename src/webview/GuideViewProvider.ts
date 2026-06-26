@@ -1,6 +1,6 @@
 import { randomBytes } from "crypto";
 import * as vscode from "vscode";
-import { GuideFilters, GuideService, normalizeGuideFilters } from "../services/guideService";
+import { ALL_CATEGORY, ALL_STAGE, GuideFilters, GuideService, GuideViewModel, normalizeGuideFilters } from "../services/guideService";
 
 type WebviewMessage =
   | { readonly type: "ready" }
@@ -15,6 +15,7 @@ type WebviewMessage =
       readonly lesson?: unknown;
     }
   | { readonly type: "toggleFavorite"; readonly id?: unknown }
+  | { readonly type: "completeLesson"; readonly id?: unknown }
   | { readonly type: "copy"; readonly id?: unknown }
   | { readonly type: "run"; readonly id?: unknown }
   | { readonly type: "refreshConfig" };
@@ -29,7 +30,12 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
     private readonly extensionUri: vscode.Uri,
     private readonly guideService: GuideService
   ) {
-    this.filters = normalizeGuideFilters({ language: guideService.getLanguage() });
+    const learningState = guideService.getLearningState();
+    this.filters = normalizeGuideFilters({
+      language: guideService.getLanguage(),
+      lesson: learningState.currentLessonId,
+      viewMode: learningState.viewMode
+    });
   }
 
   public resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -71,11 +77,36 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       case "filter":
         this.filters = normalizeGuideFilters(message, this.filters.language);
         await this.guideService.setLanguage(this.filters.language);
-        await this.postViewModel();
+        {
+          const model = this.guideService.createViewModel(this.filters);
+          this.filters = normalizeGuideFilters({ ...this.filters, lesson: model.lesson, viewMode: model.viewMode }, model.language);
+          await this.guideService.setLearningFocus(model.lesson, model.viewMode);
+          await this.postViewModel(model);
+        }
         return;
       case "toggleFavorite":
         if (typeof message.id === "string") {
           await this.guideService.toggleFavorite(message.id);
+          await this.postViewModel();
+        }
+        return;
+      case "completeLesson":
+        if (typeof message.id === "string") {
+          const nextLessonId = await this.guideService.completeLesson(message.id);
+          if (nextLessonId !== undefined) {
+            this.filters = normalizeGuideFilters(
+              {
+                query: "",
+                category: ALL_CATEGORY,
+                stage: ALL_STAGE,
+                favoritesOnly: false,
+                language: this.filters.language,
+                viewMode: "practice",
+                lesson: nextLessonId
+              },
+              this.filters.language
+            );
+          }
           await this.postViewModel();
         }
         return;
@@ -106,13 +137,13 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async postViewModel(): Promise<void> {
+  private async postViewModel(model?: GuideViewModel): Promise<void> {
     if (this.view === undefined) {
       return;
     }
 
-    const model = this.guideService.createViewModel(this.filters);
-    const delivered = await this.view.webview.postMessage({ type: "viewModel", model });
+    const nextModel = model ?? this.guideService.createViewModel(this.filters);
+    const delivered = await this.view.webview.postMessage({ type: "viewModel", model: nextModel });
     if (!delivered) {
       void vscode.window.showWarningMessage("Vim Guide could not update the sidebar view. Reopen the view if it appears stale.");
     }
@@ -304,6 +335,8 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
         .lesson-meta,
         .lesson-note,
         .lesson-label,
+        .today-meta,
+        .lesson-map summary,
         .path-count {
           color: var(--vscode-descriptionForeground);
           font-size: 12px;
@@ -321,52 +354,101 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
           gap: 8px;
         }
 
-        .lesson-card {
+        .today-card {
           display: grid;
-          border: 1px solid var(--vscode-panel-border);
+          gap: 9px;
+          border: 1px solid var(--vscode-focusBorder);
           border-radius: var(--radius);
+          padding: 10px;
           background: var(--vscode-sideBar-background);
         }
 
-        .lesson-card.active {
-          border-color: var(--vscode-focusBorder);
-        }
-
-        .lesson-card summary {
+        .today-top {
           display: grid;
-          gap: 8px;
-          padding: 9px;
-          cursor: pointer;
-          list-style: none;
+          gap: 3px;
         }
 
-        .lesson-card summary::-webkit-details-marker {
-          display: none;
-        }
-
-        .lesson-summary-top {
+        .today-title-row,
+        .lesson-nav-row {
           display: flex;
           align-items: baseline;
           justify-content: space-between;
           gap: 8px;
         }
 
-        .lesson-title {
+        .today-title {
           font-weight: 650;
           overflow-wrap: anywhere;
         }
 
-        .lesson-description,
-        .lesson-practice,
-        .lesson-readiness {
+        .progress-pill {
+          border: 1px solid var(--vscode-badge-background, var(--vscode-panel-border));
+          border-radius: 999px;
+          color: var(--vscode-descriptionForeground);
+          background: transparent;
+          padding: 1px 6px;
+          white-space: nowrap;
+        }
+
+        .today-prompt,
+        .today-readiness {
           margin: 0;
           overflow-wrap: anywhere;
         }
 
-        .lesson-body {
+        .lesson-checklist {
+          margin: 0;
+          padding-left: 18px;
+        }
+
+        .lesson-checklist li {
+          margin: 2px 0;
+          overflow-wrap: anywhere;
+        }
+
+        .today-actions,
+        .detail-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+        }
+
+        .lesson-map {
           display: grid;
           gap: 8px;
-          padding: 0 9px 9px;
+        }
+
+        .lesson-map summary {
+          cursor: pointer;
+        }
+
+        .lesson-nav-list {
+          display: grid;
+          gap: 6px;
+          margin-top: 8px;
+        }
+
+        .lesson-nav {
+          display: grid;
+          gap: 6px;
+          border: 1px solid var(--vscode-panel-border);
+          border-radius: var(--radius);
+          padding: 8px;
+          background: var(--vscode-sideBar-background);
+        }
+
+        .lesson-nav.active {
+          border-color: var(--vscode-focusBorder);
+        }
+
+        .lesson-nav-title {
+          font-weight: 650;
+          overflow-wrap: anywhere;
+        }
+
+        .lesson-description {
+          margin: 0;
+          overflow-wrap: anywhere;
         }
 
         .lesson-items {
@@ -394,6 +476,22 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
 
         .lesson-action {
           justify-self: start;
+        }
+
+        .detail-results {
+          display: grid;
+          gap: 8px;
+        }
+
+        .detail-results summary {
+          cursor: pointer;
+          color: var(--vscode-descriptionForeground);
+        }
+
+        .detail-list {
+          display: grid;
+          gap: 8px;
+          margin-top: 8px;
         }
 
         .vim-summary {
@@ -802,42 +900,35 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
           const list = document.createElement("div");
           list.className = "lesson-list";
 
-          for (const lesson of model.lessons) {
-            list.append(renderLesson(lesson, model));
+          if (model.currentLesson) {
+            list.append(renderTodayLesson(model.currentLesson, model));
           }
 
+          list.append(renderLessonMap(model));
           curriculum.append(head, modeToggle, list);
         }
 
-        function renderLesson(lesson, model) {
-          const card = document.createElement("details");
-          card.className = lesson.active ? "lesson-card active" : "lesson-card";
-          card.open = lesson.initiallyOpen;
-
-          const summary = document.createElement("summary");
-          const topLine = document.createElement("div");
-          topLine.className = "lesson-summary-top";
+        function renderTodayLesson(lesson, model) {
+          const card = document.createElement("article");
+          card.className = "today-card";
+          const top = document.createElement("div");
+          top.className = "today-top";
+          const titleRow = document.createElement("div");
+          titleRow.className = "today-title-row";
           const title = document.createElement("div");
-          title.className = "lesson-title";
-          title.textContent = lesson.active ? model.ui.currentLesson + ": " + lesson.title : lesson.title;
+          title.className = "today-title";
+          title.textContent = model.ui.todayPracticeTitle + ": " + lesson.title;
+          const progress = document.createElement("span");
+          progress.className = "progress-pill";
+          progress.textContent = lesson.progressLabel;
+          titleRow.append(title, progress);
           const meta = document.createElement("div");
-          meta.className = "lesson-meta";
-          meta.textContent = lesson.stageLabel + " · " + lesson.itemCount;
-          topLine.append(title, meta);
+          meta.className = "today-meta";
+          meta.textContent = lesson.stageLabel + " · " + lesson.itemCount + "/" + model.totalCount;
+          top.append(titleRow, meta);
 
-          const description = document.createElement("p");
-          description.className = "lesson-description";
-          description.textContent = lesson.description;
-          summary.append(topLine, description);
-
-          const body = document.createElement("div");
-          body.className = "lesson-body";
-
-          const practiceLabel = document.createElement("div");
-          practiceLabel.className = "lesson-label";
-          practiceLabel.textContent = model.ui.practicePrompt;
           const practice = document.createElement("p");
-          practice.className = "lesson-practice";
+          practice.className = "today-prompt";
           practice.textContent = lesson.practicePrompt;
 
           const itemLabel = document.createElement("div");
@@ -857,13 +948,68 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
             itemList.append(row);
           }
 
+          const checklistLabel = document.createElement("div");
+          checklistLabel.className = "lesson-label";
+          checklistLabel.textContent = model.ui.checklistLabel;
+          const checklist = document.createElement("ul");
+          checklist.className = "lesson-checklist";
+          for (const item of lesson.checklist) {
+            const row = document.createElement("li");
+            row.textContent = item;
+            checklist.append(row);
+          }
+
           const readinessLabel = document.createElement("div");
           readinessLabel.className = "lesson-label";
           readinessLabel.textContent = model.ui.readiness;
           const readiness = document.createElement("p");
-          readiness.className = "lesson-readiness";
+          readiness.className = "today-readiness";
           readiness.textContent = lesson.readinessHint;
 
+          const actions = document.createElement("div");
+          actions.className = "today-actions";
+          const complete = document.createElement("button");
+          complete.type = "button";
+          complete.textContent = lesson.nextLessonId ? model.ui.completeAndNext : model.ui.markLessonDone;
+          complete.addEventListener("click", () => vscode.postMessage({ type: "completeLesson", id: lesson.id }));
+          actions.append(complete);
+
+          card.append(top, practice, itemLabel, itemList, checklistLabel, checklist, readinessLabel, readiness, actions);
+          return card;
+        }
+
+        function renderLessonMap(model) {
+          const map = document.createElement("details");
+          map.className = "lesson-map";
+          const summary = document.createElement("summary");
+          summary.textContent = model.ui.lessonMapTitle + " · " + model.completedLessonCount + "/" + model.lessonCount;
+          const list = document.createElement("div");
+          list.className = "lesson-nav-list";
+          for (const lesson of model.lessons) {
+            list.append(renderLessonNav(lesson, model));
+          }
+          map.append(summary, list);
+          return map;
+        }
+
+        function renderLessonNav(lesson, model) {
+          const row = document.createElement("article");
+          row.className = lesson.active ? "lesson-nav active" : "lesson-nav";
+          const titleRow = document.createElement("div");
+          titleRow.className = "lesson-nav-row";
+          const title = document.createElement("div");
+          title.className = "lesson-nav-title";
+          title.textContent = lesson.title;
+          const progress = document.createElement("span");
+          progress.className = "progress-pill";
+          progress.textContent = lesson.completed ? model.ui.completedBadge : lesson.progressLabel;
+          titleRow.append(title, progress);
+          const meta = document.createElement("div");
+          meta.className = "lesson-meta";
+          meta.textContent = lesson.stageLabel + " · " + lesson.itemCount;
+          const description = document.createElement("p");
+          description.className = "lesson-description";
+          description.textContent = lesson.description;
           const action = document.createElement("button");
           action.className = "secondary lesson-action";
           action.type = "button";
@@ -883,10 +1029,8 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
               lesson: lesson.id
             });
           });
-
-          body.append(practiceLabel, practice, itemLabel, itemList, readinessLabel, readiness, action);
-          card.append(summary, body);
-          return card;
+          row.append(titleRow, meta, description, action);
+          return row;
         }
 
         function renderGuidance(model) {
@@ -908,15 +1052,14 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
     function renderItems(model) {
       results.replaceChildren();
 
+          const practiceOnly =
+            model.viewMode === "practice" && model.query.trim().length === 0 && model.category === "All" && !model.favoritesOnly && model.currentLesson;
           const title = document.createElement("div");
           title.className = "results-title";
-          title.textContent =
-            model.viewMode === "practice" && model.query.trim().length === 0 && model.category === "All" && !model.favoritesOnly && model.currentLesson
-              ? model.ui.currentLesson + ": " + model.currentLesson.title
-              : model.ui.resultsTitle;
-          results.append(title);
+          title.textContent = practiceOnly ? model.ui.lessonDetailsLabel : model.ui.resultsTitle;
 
           if (model.items.length === 0) {
+            results.append(title);
             const empty = document.createElement("div");
             empty.className = "empty-results";
             empty.textContent = describeNoResults(model);
@@ -924,6 +1067,22 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
             return;
       }
 
+      if (practiceOnly) {
+        const details = document.createElement("details");
+        details.className = "detail-results";
+        const summary = document.createElement("summary");
+        summary.textContent = model.ui.lessonDetailsLabel;
+        const list = document.createElement("div");
+        list.className = "detail-list";
+        for (const item of model.items) {
+          list.append(renderItem(item));
+        }
+        details.append(summary, list);
+        results.append(details);
+        return;
+      }
+
+      results.append(title);
       for (const item of model.items) {
         results.append(renderItem(item));
       }
@@ -970,7 +1129,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       favorite.className = "secondary";
       favorite.type = "button";
       favorite.textContent = item.favorite ? currentModel.ui.removeFavorite : currentModel.ui.addFavorite;
-      favorite.title = item.favorite ? "Remove from favorites" : "Add to favorites";
+      favorite.title = item.favorite ? currentModel.ui.removeFavoriteTitle : currentModel.ui.addFavoriteTitle;
       favorite.setAttribute("aria-pressed", item.favorite ? "true" : "false");
       favorite.setAttribute("aria-label", currentModel.ui.favorites + ": " + item.displayTitle);
       favorite.addEventListener("click", () => vscode.postMessage({ type: "toggleFavorite", id: item.id }));
@@ -996,7 +1155,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       copy.className = "secondary";
       copy.type = "button";
       copy.textContent = currentModel.ui.copy;
-      copy.title = "Copy keys";
+      copy.title = currentModel.ui.copyTitle;
       copy.setAttribute("aria-label", currentModel.ui.copy + ": " + item.displayTitle);
       copy.addEventListener("click", () => vscode.postMessage({ type: "copy", id: item.id }));
       actions.append(copy);
@@ -1005,7 +1164,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
         const run = document.createElement("button");
         run.type = "button";
         run.textContent = currentModel.ui.run;
-        run.title = "Run VS Code command";
+        run.title = currentModel.ui.runTitle;
         run.setAttribute("aria-label", currentModel.ui.run + ": " + item.displayTitle);
         run.addEventListener("click", () => vscode.postMessage({ type: "run", id: item.id }));
         actions.append(run);
@@ -1044,6 +1203,7 @@ function isWebviewMessage(value: unknown): value is WebviewMessage {
     type === "ready" ||
     type === "filter" ||
     type === "toggleFavorite" ||
+    type === "completeLesson" ||
     type === "copy" ||
     type === "run" ||
     type === "refreshConfig"
