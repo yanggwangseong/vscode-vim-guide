@@ -2,6 +2,10 @@ export type GuideItemSource = "vim" | "vscode" | "vscodevim";
 
 export type GuideItemType = "command" | "tip" | "vscode-command";
 
+export const guideItemStages = ["beginner", "productive", "advanced"] as const;
+
+export type GuideItemStage = (typeof guideItemStages)[number];
+
 export interface GuideItem {
   readonly id: string;
   readonly title: string;
@@ -10,11 +14,55 @@ export interface GuideItem {
   readonly description: string;
   readonly source: GuideItemSource;
   readonly type: GuideItemType;
+  readonly stage: GuideItemStage;
   readonly tags: readonly string[];
   readonly command?: string;
 }
 
-export const guideItems: readonly GuideItem[] = [
+type GuideItemSeed = Omit<GuideItem, "stage">;
+
+export const guideItemStageOverrides: Readonly<Record<string, GuideItemStage>> = {
+  "vim-motion-page-down": "productive",
+  "vim-motion-page-up": "productive",
+  "vim-motion-match-pair": "productive",
+  "vim-edit-replace-char": "productive",
+  "vim-edit-join-lines": "productive",
+  "vim-edit-repeat-change": "productive",
+  "vim-mode-visual-block": "advanced",
+  "vim-search-forward": "productive",
+  "vim-search-backward": "productive",
+  "vim-search-next": "productive",
+  "vim-search-previous": "productive",
+  "vim-search-word-forward": "productive",
+  "vim-register-system": "productive",
+  "vim-register-named": "productive",
+  "vim-register-black-hole": "advanced",
+  "vim-macro-record": "advanced",
+  "vim-macro-play": "advanced",
+  "vim-text-object-inner-word": "productive",
+  "vim-text-object-around-word": "productive",
+  "vim-text-object-inner-parens": "advanced",
+  "vim-text-object-around-quotes": "advanced",
+  "vim-window-split-horizontal": "advanced",
+  "vim-window-split-vertical": "advanced",
+  "vim-window-move-left": "advanced",
+  "vim-window-move-right": "advanced",
+  "vscodevim-leader-tip": "advanced",
+  "vscodevim-clipboard-tip": "productive",
+  "vscodevim-keybindings-tip": "advanced",
+  "vscode-command-goto-line": "productive",
+  "vscode-command-recent-editor": "productive",
+  "vscode-command-toggle-sidebar": "productive",
+  "vscode-command-find-files": "productive",
+  "vscode-command-replace": "productive",
+  "vscode-command-toggle-terminal": "productive",
+  "vscode-command-toggle-panel": "productive",
+  "vscode-command-navigate-back": "productive",
+  "vscode-command-close-editor": "productive",
+  "vscode-command-next-editor": "productive"
+};
+
+const guideItemSeeds: readonly GuideItemSeed[] = [
   {
     id: "vim-motion-word-forward",
     title: "Move to next word",
@@ -627,4 +675,13 @@ export const guideItems: readonly GuideItem[] = [
     tags: ["editor", "tab", "navigation"],
     command: "workbench.action.nextEditor"
   }
-] as const;
+];
+
+export const guideItems: readonly GuideItem[] = guideItemSeeds.map((item) => ({
+  ...item,
+  stage: getGuideItemStage(item.id)
+}));
+
+function getGuideItemStage(id: string): GuideItemStage {
+  return guideItemStageOverrides[id] ?? "beginner";
+}

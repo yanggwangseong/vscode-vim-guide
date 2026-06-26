@@ -9,12 +9,15 @@ This extension does not emulate Vim and does not replace VSCodeVim.
 - Activity Bar container and Sidebar view named `Vim Guide`.
 - 48 Vim command and productivity tip entries.
 - 12 VS Code integration command entries.
-- Search across title, keys, description, category, and tags.
-- Category filtering.
+- Search across title, keys, description, category, learning stage, and tags.
+- Category and learning-stage filtering.
+- Compact `Start here` shortcuts for first-run practice.
 - Empty search and no-results states.
 - Favorites stored with VS Code global extension state.
+- Favorites-only practice queue.
 - Copy action for every guide item.
 - Run action only for explicitly allowlisted VS Code commands.
+- Readable item badges for learning stage, category, and action type.
 - Read-only optional VSCodeVim settings summary:
   - `vim.leader`
   - `vim.normalModeKeyBindings`
@@ -68,10 +71,12 @@ In the Extension Development Host, verify:
 
 - Activity Bar includes `Vim Guide`.
 - Sidebar renders guide items.
-- Search and category filter update results.
+- Search, learning-stage, category, and favorites-only filters update results.
+- `Start here` shortcuts narrow the list to beginner-friendly commands.
 - A no-results state appears for unmatched searches.
 - Favorite toggles persist after reload.
 - Copy writes the visible guide item keys to the clipboard.
+- Item badges distinguish typed Vim actions, tips, and runnable VS Code actions.
 - VSCodeVim settings panel handles installed, missing, empty, and malformed settings without failing.
 - Run buttons appear only for VS Code command entries.
 
@@ -94,9 +99,10 @@ The webview sends guide item ids to the extension host. It never sends arbitrary
 | Activity Bar shows `Vim Guide` | `package.json` contributions, Extension Development Host smoke |
 | Sidebar renders initial list | `GuideViewProvider` fake webview HTML/model test; actual DOM render is covered by the Extension Development Host checklist |
 | Search fields covered | `GuideService` seed and fixture tests |
-| Category filter | `GuideService` tests |
+| Category and learning-stage filters | `GuideService` filter tests |
 | Empty query and no-results states | `GuideService` view model tests, `GuideViewProvider` HTML/message tests, Extension Development Host checklist |
-| Favorites add/remove and persist | `GuideService` state tests, `GuideViewProvider` message tests |
+| Favorites add/remove, persist, and favorites-only queue | `GuideService` state/filter tests, `GuideViewProvider` message tests |
+| Start here shortcuts and readable item badges | `GuideViewProvider` HTML/model tests, Extension Development Host checklist |
 | Copy action for guide items | `GuideViewProvider` copy message clipboard test, Extension Development Host checklist |
 | 40 to 60 Vim command/tip seed items | data count test |
 | 10 to 15 VS Code command seed items | data count test |

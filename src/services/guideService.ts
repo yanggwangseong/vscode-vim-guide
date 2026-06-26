@@ -1,13 +1,34 @@
 import * as vscode from "vscode";
-import { GuideItem, guideItems } from "../data/guideData";
+import { GuideItem, GuideItemStage, guideItemStages, guideItems } from "../data/guideData";
 
 export const ALL_CATEGORY = "All";
+export const ALL_STAGE = "All";
 export const FAVORITES_KEY = "vimGuide.favoriteIds.v1";
 const MAX_BINDING_ENTRIES_TO_INSPECT = 100;
 const MAX_BINDING_SAMPLES = 3;
 const MAX_SUMMARY_TEXT_LENGTH = 80;
 const MAX_BINDING_ENTRY_TEXT_LENGTH = 120;
 const MAX_NESTED_SETTING_ITEMS = 12;
+const STARTER_ITEM_IDS = [
+  "vim-mode-insert-before",
+  "vim-motion-word-forward",
+  "vim-edit-delete-line",
+  "vim-edit-yank-line",
+  "vscode-command-quick-open"
+] as const;
+const CATEGORY_ORDER = [
+  "Modes",
+  "Motions",
+  "Editing",
+  "Selection",
+  "Search",
+  "Text Objects",
+  "Registers",
+  "Windows",
+  "Macros",
+  "VSCodeVim",
+  "VS Code Commands"
+] as const;
 
 export const ALLOWED_VSCODE_COMMANDS = new Set<string>([
   "workbench.action.quickOpen",
@@ -36,11 +57,37 @@ export interface ConfigurationReader {
 export interface GuideItemViewModel extends GuideItem {
   readonly favorite: boolean;
   readonly executable: boolean;
+  readonly stageLabel: string;
+  readonly actionLabel: string;
+}
+
+export type GuideStageFilter = typeof ALL_STAGE | GuideItemStage;
+
+export interface GuideStageOption {
+  readonly id: GuideStageFilter;
+  readonly label: string;
+}
+
+export interface GuideFilterInput {
+  readonly query?: unknown;
+  readonly category?: unknown;
+  readonly stage?: unknown;
+  readonly favoritesOnly?: unknown;
+}
+
+export interface GuideFilters {
+  readonly query: string;
+  readonly category: string;
+  readonly stage: GuideStageFilter;
+  readonly favoritesOnly: boolean;
 }
 
 export interface GuideViewModel {
   readonly query: string;
   readonly category: string;
+  readonly stage: GuideStageFilter;
+  readonly stages: readonly GuideStageOption[];
+  readonly favoritesOnly: boolean;
   readonly categories: readonly string[];
   readonly totalCount: number;
   readonly resultCount: number;
@@ -48,6 +95,8 @@ export interface GuideViewModel {
   readonly emptyQuery: boolean;
   readonly noResults: boolean;
   readonly items: readonly GuideItemViewModel[];
+  readonly starterItems: readonly GuideItemViewModel[];
+  readonly guidanceText: string;
   readonly vscodeVim: VscodeVimSnapshot;
 }
 
@@ -110,7 +159,16 @@ export class GuideService {
 
   public getCategories(): readonly string[] {
     const categories = new Set(this.items.map((item) => item.category));
-    return [ALL_CATEGORY, ...Array.from(categories).sort((a, b) => a.localeCompare(b))];
+    const ordered = CATEGORY_ORDER.filter((category) => categories.delete(category));
+    const remaining = Array.from(categories).sort((a, b) => a.localeCompare(b));
+    return [ALL_CATEGORY, ...ordered, ...remaining];
+  }
+
+  public getStages(): readonly GuideStageOption[] {
+    return [
+      { id: ALL_STAGE, label: "All stages" },
+      ...guideItemStages.map((stage) => ({ id: stage, label: stageLabel(stage) }))
+    ];
   }
 
   public getFavoriteIds(): readonly string[] {
@@ -146,13 +204,19 @@ export class GuideService {
     return nextFavorite;
   }
 
-  public searchItems(query = "", category = ALL_CATEGORY): readonly GuideItem[] {
-    const normalizedQuery = normalize(query);
-    const selectedCategory = category.trim() || ALL_CATEGORY;
+  public searchItems(queryOrFilters: string | GuideFilterInput = "", category = ALL_CATEGORY): readonly GuideItem[] {
+    const filters = normalizeGuideFilters(
+      typeof queryOrFilters === "string" ? { query: queryOrFilters, category } : queryOrFilters
+    );
+    const normalizedQuery = normalize(filters.query);
 
     return this.items.filter((item) => {
-      const categoryMatches = selectedCategory === ALL_CATEGORY || item.category === selectedCategory;
+      const categoryMatches = filters.category === ALL_CATEGORY || item.category === filters.category;
       if (!categoryMatches) {
+        return false;
+      }
+
+      if (filters.stage !== ALL_STAGE && item.stage !== filters.stage) {
         return false;
       }
 
@@ -164,24 +228,31 @@ export class GuideService {
     });
   }
 
-  public createViewModel(query = "", category = ALL_CATEGORY): GuideViewModel {
+  public createViewModel(queryOrFilters: string | GuideFilterInput = "", category = ALL_CATEGORY): GuideViewModel {
+    const filters = normalizeGuideFilters(
+      typeof queryOrFilters === "string" ? { query: queryOrFilters, category } : queryOrFilters
+    );
     const favoriteIds = new Set(this.getFavoriteIds());
-    const results = this.searchItems(query, category).map((item) => ({
-      ...item,
-      favorite: favoriteIds.has(item.id),
-      executable: this.isExecutable(item)
-    }));
+    const results = this.searchItems(filters)
+      .filter((item) => !filters.favoritesOnly || favoriteIds.has(item.id))
+      .map((item) => this.toViewModel(item, favoriteIds));
+    const starterItems = this.getStarterItems(filters, favoriteIds);
 
     return {
-      query,
-      category: category.trim() || ALL_CATEGORY,
+      query: filters.query,
+      category: filters.category,
+      stage: filters.stage,
+      stages: this.getStages(),
+      favoritesOnly: filters.favoritesOnly,
       categories: this.getCategories(),
       totalCount: this.items.length,
       resultCount: results.length,
       favoriteCount: favoriteIds.size,
-      emptyQuery: query.trim().length === 0,
+      emptyQuery: filters.query.trim().length === 0,
       noResults: results.length === 0,
       items: results,
+      starterItems,
+      guidanceText: getGuidanceText(filters, favoriteIds.size),
       vscodeVim: this.getVscodeVimSnapshot()
     };
   }
@@ -212,6 +283,45 @@ export class GuideService {
   public getVscodeVimSnapshot(): VscodeVimSnapshot {
     return parseVscodeVimConfig(this.configurationReader(), this.extensionInstalled());
   }
+
+  private toViewModel(item: GuideItem, favoriteIds: ReadonlySet<string>): GuideItemViewModel {
+    const executable = this.isExecutable(item);
+    return {
+      ...item,
+      favorite: favoriteIds.has(item.id),
+      executable,
+      stageLabel: stageLabel(item.stage),
+      actionLabel: actionLabel(item, executable)
+    };
+  }
+
+  private getStarterItems(filters: GuideFilters, favoriteIds: ReadonlySet<string>): readonly GuideItemViewModel[] {
+    if (
+      filters.query.trim().length > 0 ||
+      filters.category !== ALL_CATEGORY ||
+      filters.stage !== ALL_STAGE ||
+      filters.favoritesOnly
+    ) {
+      return [];
+    }
+
+    return STARTER_ITEM_IDS.map((id) => this.itemMap.get(id))
+      .filter((item): item is GuideItem => item !== undefined)
+      .map((item) => this.toViewModel(item, favoriteIds));
+  }
+}
+
+export function normalizeGuideFilters(input: GuideFilterInput = {}): GuideFilters {
+  return {
+    query: typeof input.query === "string" ? input.query : "",
+    category: typeof input.category === "string" && input.category.trim().length > 0 ? input.category : ALL_CATEGORY,
+    stage: isGuideStageFilter(input.stage) ? input.stage : ALL_STAGE,
+    favoritesOnly: input.favoritesOnly === true
+  };
+}
+
+export function isGuideStageFilter(value: unknown): value is GuideStageFilter {
+  return value === ALL_STAGE || guideItemStages.some((stage) => stage === value);
 }
 
 export function parseVscodeVimConfig(config: ConfigurationReader, installed: boolean): VscodeVimSnapshot {
@@ -356,7 +466,7 @@ function summarizeCommandList(value: unknown): ArraySummary {
 }
 
 function searchableText(item: GuideItem): string {
-  return normalize([item.title, item.keys, item.description, item.category, ...item.tags].join(" "));
+  return normalize([item.title, item.keys, item.description, item.category, stageLabel(item.stage), ...item.tags].join(" "));
 }
 
 function normalize(value: string): string {
@@ -396,4 +506,55 @@ function favoriteStorageMatches(stored: unknown, favorites: readonly string[]): 
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function getGuidanceText(filters: GuideFilters, favoriteCount: number): string {
+  if (filters.favoritesOnly && favoriteCount === 0) {
+    return "Favorite commands to build a personal practice queue.";
+  }
+
+  if (filters.favoritesOnly) {
+    return "Practice queue: your saved commands and tips.";
+  }
+
+  if (filters.stage === "beginner") {
+    return "Beginner path: modes, movement, and basic edits.";
+  }
+
+  if (filters.stage === "productive") {
+    return "Productive path: search, text objects, registers, and VS Code flow.";
+  }
+
+  if (filters.stage === "advanced") {
+    return "Advanced path: macros, windows, and VSCodeVim remaps.";
+  }
+
+  if (filters.query.trim().length === 0 && filters.category === ALL_CATEGORY) {
+    return "Start with the basics, then move to Productive and Advanced.";
+  }
+
+  return "";
+}
+
+function stageLabel(stage: GuideItemStage): string {
+  switch (stage) {
+    case "beginner":
+      return "Beginner";
+    case "productive":
+      return "Productive";
+    case "advanced":
+      return "Advanced";
+  }
+}
+
+function actionLabel(item: GuideItem, executable: boolean): string {
+  if (executable) {
+    return "Runnable VS Code action";
+  }
+
+  if (item.type === "tip") {
+    return "Tip";
+  }
+
+  return "Type in editor";
 }

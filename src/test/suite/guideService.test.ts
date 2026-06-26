@@ -1,9 +1,10 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
-import { GuideItem, guideItems } from "../../data/guideData";
+import { GuideItem, guideItemStageOverrides, guideItemStages, guideItems } from "../../data/guideData";
 import {
   ALLOWED_VSCODE_COMMANDS,
   ALL_CATEGORY,
+  ALL_STAGE,
   ConfigurationReader,
   FAVORITES_KEY,
   GuideViewModel,
@@ -134,6 +135,7 @@ suite("guide data", () => {
 
   test("has stable ids and required fields", () => {
     const ids = new Set<string>();
+    const validStages = new Set<string>(guideItemStages);
 
     for (const item of guideItems) {
       assert.ok(item.id.length > 0, "id is required");
@@ -144,7 +146,15 @@ suite("guide data", () => {
       assert.ok(item.description.length > 0, `description is required for ${item.id}`);
       assert.ok(item.source.length > 0, `source is required for ${item.id}`);
       assert.ok(item.type.length > 0, `type is required for ${item.id}`);
+      assert.ok(validStages.has(item.stage), `stage is invalid for ${item.id}`);
       ids.add(item.id);
+    }
+
+    for (const id of Object.keys(guideItemStageOverrides)) {
+      assert.ok(ids.has(id), `stage override references an unknown item: ${id}`);
+    }
+    for (const stage of guideItemStages) {
+      assert.ok(guideItems.some((item) => item.stage === stage), `stage has no items: ${stage}`);
     }
   });
 
@@ -181,6 +191,7 @@ suite("GuideService", () => {
         description: "plain description",
         source: "vim",
         type: "tip",
+        stage: "beginner",
         tags: ["plain"]
       },
       {
@@ -191,6 +202,7 @@ suite("GuideService", () => {
         description: "plain description",
         source: "vim",
         type: "tip",
+        stage: "productive",
         tags: ["plain"]
       },
       {
@@ -201,6 +213,7 @@ suite("GuideService", () => {
         description: "GammaDescriptionOnly",
         source: "vim",
         type: "tip",
+        stage: "advanced",
         tags: ["plain"]
       },
       {
@@ -211,6 +224,7 @@ suite("GuideService", () => {
         description: "plain description",
         source: "vim",
         type: "tip",
+        stage: "productive",
         tags: ["DeltaTagOnly"]
       }
     ];
@@ -233,6 +247,63 @@ suite("GuideService", () => {
     assert.ok(searchModel.items.every((item) => item.category === "Search"));
     assert.ok(noResultsModel.noResults);
     assert.strictEqual(noResultsModel.resultCount, 0);
+  });
+
+  test("orders learning stages and filters by stage", () => {
+    const service = createService();
+    const stages = service.getStages();
+    const beginnerModel = service.createViewModel({ stage: "beginner" });
+    const productiveSearch = service.createViewModel({ query: "quick open", stage: "productive" });
+
+    assert.deepStrictEqual(
+      stages.map((stage) => stage.id),
+      [ALL_STAGE, "beginner", "productive", "advanced"]
+    );
+    assert.ok(beginnerModel.items.length > 0);
+    assert.ok(beginnerModel.items.every((item) => item.stage === "beginner"));
+    assert.ok(productiveSearch.noResults, "Quick open is a beginner VS Code command and should not appear in productive-only results");
+  });
+
+  test("combines query, category, stage, and favorites-only filters", async () => {
+    const state = new MemoryState();
+    const service = createService(state);
+
+    await service.toggleFavorite("vim-edit-delete-line");
+    await service.toggleFavorite("vim-search-forward");
+
+    const favoriteBeginnerEdit = service.createViewModel({
+      query: "delete",
+      category: "Editing",
+      stage: "beginner",
+      favoritesOnly: true
+    });
+    const favoriteProductiveEdit = service.createViewModel({
+      category: "Editing",
+      stage: "productive",
+      favoritesOnly: true
+    });
+    const emptyFavorites = createService().createViewModel({ favoritesOnly: true });
+
+    assert.deepStrictEqual(favoriteBeginnerEdit.items.map((item) => item.id), ["vim-edit-delete-line"]);
+    assert.ok(favoriteProductiveEdit.noResults);
+    assert.strictEqual(emptyFavorites.noResults, true);
+    assert.strictEqual(emptyFavorites.guidanceText, "Favorite commands to build a personal practice queue.");
+  });
+
+  test("normalizes malformed filter payloads", () => {
+    const service = createService();
+    const model = service.createViewModel({
+      query: 42,
+      category: 42,
+      stage: "unknown-stage",
+      favoritesOnly: "yes"
+    });
+
+    assert.strictEqual(model.query, "");
+    assert.strictEqual(model.category, ALL_CATEGORY);
+    assert.strictEqual(model.stage, ALL_STAGE);
+    assert.strictEqual(model.favoritesOnly, false);
+    assert.strictEqual(model.resultCount, 60);
   });
 
   test("persists favorites through state", async () => {
@@ -296,6 +367,7 @@ suite("GuideService", () => {
         description: "Fixture command that must not execute.",
         source: "vscode",
         type: "vscode-command",
+        stage: "productive",
         tags: ["fixture"],
         command: "evil.command"
       }
@@ -431,11 +503,18 @@ suite("GuideViewProvider", () => {
     assert.strictEqual(fake.webview.options.enableScripts, true);
     assert.ok(fake.webview.html.includes("Content-Security-Policy"));
     assert.ok(fake.webview.html.includes('id="search"'));
+    assert.ok(fake.webview.html.includes('id="stage"'));
     assert.ok(fake.webview.html.includes('aria-label="Search guide items"'));
+    assert.ok(fake.webview.html.includes('id="favorites-only"'));
+    assert.ok(fake.webview.html.includes('id="starter"'));
+    assert.ok(fake.webview.html.includes('id="vim-summary-status"'));
     assert.ok(fake.webview.html.includes('id="settings-list"'));
     assert.ok(fake.webview.html.includes('id="results"'));
     assert.ok(!fake.webview.html.includes('id="results" aria-live'));
     assert.ok(fake.webview.html.includes('id="count" role="status" aria-live="polite"'));
+    assert.ok(fake.webview.html.includes(".empty-results"));
+    assert.ok(!fake.webview.html.includes(".empty {"));
+    assert.ok(fake.webview.html.includes('"setting-value status-"'));
     assert.ok(fake.webview.html.includes("describeNoResults"));
     assert.ok(fake.webview.html.includes("Toggle favorite for "));
     assert.ok(fake.webview.html.includes('"totalCount":60'));
@@ -455,11 +534,15 @@ suite("GuideViewProvider", () => {
     let model = latestViewModel(fake.webview);
     assert.strictEqual(model.totalCount, 60);
     assert.strictEqual(model.resultCount, 60);
+    assert.strictEqual(model.starterItems.length, 5);
+    assert.ok(model.guidanceText.includes("Start with the basics"));
 
-    fake.webview.receive({ type: "filter", query: "delete line", category: ALL_CATEGORY });
+    fake.webview.receive({ type: "filter", query: "delete line", category: ALL_CATEGORY, stage: "beginner", favoritesOnly: false });
     await flushPromises();
     model = latestViewModel(fake.webview);
     assert.strictEqual(model.query, "delete line");
+    assert.strictEqual(model.stage, "beginner");
+    assert.strictEqual(model.favoritesOnly, false);
     assert.ok(model.items.some((item) => item.id === "vim-edit-delete-line"));
 
     fake.webview.receive({ type: "toggleFavorite", id: "vim-edit-delete-line" });
@@ -468,6 +551,12 @@ suite("GuideViewProvider", () => {
     assert.strictEqual(model.favoriteCount, 1);
     assert.strictEqual(model.items.find((item) => item.id === "vim-edit-delete-line")?.favorite, true);
     assert.deepStrictEqual(state.get(FAVORITES_KEY, []), ["vim-edit-delete-line"]);
+
+    fake.webview.receive({ type: "filter", query: "delete line", category: ALL_CATEGORY, stage: "beginner", favoritesOnly: true });
+    await flushPromises();
+    model = latestViewModel(fake.webview);
+    assert.strictEqual(model.favoritesOnly, true);
+    assert.deepStrictEqual(model.items.map((item) => item.id), ["vim-edit-delete-line"]);
   });
 
   test("copy messages write item keys and ignore invalid ids", async () => {

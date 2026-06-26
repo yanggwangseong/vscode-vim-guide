@@ -1,10 +1,16 @@
 import { randomBytes } from "crypto";
 import * as vscode from "vscode";
-import { ALL_CATEGORY, GuideService } from "../services/guideService";
+import { GuideFilters, GuideService, normalizeGuideFilters } from "../services/guideService";
 
 type WebviewMessage =
   | { readonly type: "ready" }
-  | { readonly type: "filter"; readonly query?: unknown; readonly category?: unknown }
+  | {
+      readonly type: "filter";
+      readonly query?: unknown;
+      readonly category?: unknown;
+      readonly stage?: unknown;
+      readonly favoritesOnly?: unknown;
+    }
   | { readonly type: "toggleFavorite"; readonly id?: unknown }
   | { readonly type: "copy"; readonly id?: unknown }
   | { readonly type: "run"; readonly id?: unknown }
@@ -14,8 +20,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "vimGuide.sidebar";
 
   private view?: vscode.WebviewView;
-  private query = "";
-  private category = ALL_CATEGORY;
+  private filters: GuideFilters = normalizeGuideFilters();
 
   public constructor(
     private readonly extensionUri: vscode.Uri,
@@ -59,8 +64,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
         await this.postViewModel();
         return;
       case "filter":
-        this.query = typeof message.query === "string" ? message.query : "";
-        this.category = typeof message.category === "string" ? message.category : ALL_CATEGORY;
+        this.filters = normalizeGuideFilters(message);
         await this.postViewModel();
         return;
       case "toggleFavorite":
@@ -101,7 +105,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    const model = this.guideService.createViewModel(this.query, this.category);
+    const model = this.guideService.createViewModel(this.filters);
     const delivered = await this.view.webview.postMessage({ type: "viewModel", model });
     if (!delivered) {
       void vscode.window.showWarningMessage("Vim Guide could not update the sidebar view. Reopen the view if it appears stale.");
@@ -118,7 +122,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
 
   private getHtml(): string {
     const nonce = getNonce();
-    const model = this.guideService.createViewModel(this.query, this.category);
+    const model = this.guideService.createViewModel(this.filters);
     const initialModel = JSON.stringify(model).replace(/</g, "\\u003c");
 
     return /* html */ `<!DOCTYPE html>
@@ -212,41 +216,116 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       white-space: nowrap;
     }
 
-    .controls {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 8px;
-    }
+        .controls {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 8px;
+        }
 
-    input,
-    select {
-      width: 100%;
-      min-height: 30px;
-      border: 1px solid var(--vscode-input-border, transparent);
+        .filter-row {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+        }
+
+        input:not([type="checkbox"]),
+        select {
+          width: 100%;
+          min-height: 30px;
+          border: 1px solid var(--vscode-input-border, transparent);
       border-radius: var(--radius);
       color: var(--vscode-input-foreground);
-      background: var(--vscode-input-background);
-      padding: 5px 8px;
-    }
+          background: var(--vscode-input-background);
+          padding: 5px 8px;
+        }
 
-    input:focus,
-    select:focus,
-    button:focus {
+        input[type="checkbox"] {
+          width: auto;
+          min-height: 0;
+          margin: 0;
+        }
+
+        .toggle {
+          display: flex;
+          align-items: center;
+          gap: 7px;
+          min-height: 30px;
+          color: var(--vscode-foreground);
+        }
+
+        input:focus,
+        select:focus,
+        button:focus {
       outline: 1px solid var(--vscode-focusBorder);
       outline-offset: 1px;
     }
 
-    .notice,
-    .settings {
-      border: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-panel-border));
-      border-radius: var(--radius);
-      padding: 10px;
-      background: var(--vscode-editorWidget-background);
+        .notice,
+        .guidance,
+        .starter,
+        .vim-summary,
+        .settings {
+          border: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-panel-border));
+          border-radius: var(--radius);
+          padding: 10px;
+          background: var(--vscode-editorWidget-background);
     }
 
-    .notice {
-      color: var(--vscode-descriptionForeground);
-    }
+        .notice {
+          color: var(--vscode-descriptionForeground);
+        }
+
+        .guidance {
+          color: var(--vscode-descriptionForeground);
+        }
+
+        .starter {
+          display: grid;
+          gap: 8px;
+        }
+
+        .starter-title {
+          font-weight: 650;
+        }
+
+        .starter-list {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+        }
+
+        .starter-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          max-width: 100%;
+        }
+
+        .starter-chip code {
+          color: var(--vscode-editor-foreground);
+          font-family: var(--vscode-editor-font-family);
+        }
+
+        .vim-summary {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: var(--gap);
+        }
+
+        .vim-summary-text {
+          min-width: 0;
+        }
+
+        .vim-summary-title {
+          font-weight: 650;
+        }
+
+        .vim-summary-status {
+          color: var(--vscode-descriptionForeground);
+          font-size: 12px;
+          overflow-wrap: anywhere;
+        }
 
     .settings-header {
       display: flex;
@@ -294,9 +373,9 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       overflow-wrap: anywhere;
     }
 
-    .setting-value.invalid {
-      color: var(--vscode-errorForeground);
-    }
+        .setting-value.status-invalid {
+          color: var(--vscode-errorForeground);
+        }
 
     .results {
       display: grid;
@@ -342,13 +421,26 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       overflow-wrap: anywhere;
     }
 
-    .meta {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 5px;
-      color: var(--vscode-descriptionForeground);
-      font-size: 12px;
-    }
+        .meta {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 5px;
+          font-size: 12px;
+        }
+
+        .badge {
+          border: 1px solid var(--vscode-badge-background, var(--vscode-panel-border));
+          border-radius: 999px;
+          color: var(--vscode-badge-foreground, var(--vscode-descriptionForeground));
+          background: var(--vscode-badge-background, transparent);
+          padding: 1px 6px;
+          overflow-wrap: anywhere;
+        }
+
+        .badge.secondary-badge {
+          color: var(--vscode-descriptionForeground);
+          background: transparent;
+        }
 
     .actions {
       display: flex;
@@ -357,24 +449,28 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       margin-top: 10px;
     }
 
-    .empty {
-      border: 1px dashed var(--vscode-panel-border);
-      border-radius: var(--radius);
-      padding: 16px 10px;
-      color: var(--vscode-descriptionForeground);
-      text-align: center;
-    }
+        .empty-results {
+          border: 1px dashed var(--vscode-panel-border);
+          border-radius: var(--radius);
+          padding: 16px 10px;
+          color: var(--vscode-descriptionForeground);
+          text-align: center;
+        }
 
     @media (max-width: 280px) {
       body {
         padding: 10px;
       }
 
-      .setting {
-        grid-template-columns: 1fr;
-        gap: 2px;
-      }
-    }
+          .setting {
+            grid-template-columns: 1fr;
+            gap: 2px;
+          }
+
+          .filter-row {
+            grid-template-columns: 1fr;
+          }
+        }
   </style>
 </head>
 <body>
@@ -384,13 +480,30 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       <span class="count" id="count" role="status" aria-live="polite"></span>
     </div>
 
-    <section class="controls" aria-label="Filters">
-      <input id="search" type="search" placeholder="Search title, keys, category, tags" autocomplete="off" aria-label="Search guide items">
-      <select id="category" aria-label="Category"></select>
-    </section>
+        <section class="controls" aria-label="Filters">
+          <input id="search" type="search" placeholder="Search title, keys, category, tags" autocomplete="off" aria-label="Search guide items">
+          <div class="filter-row">
+            <select id="stage" aria-label="Learning stage"></select>
+            <select id="category" aria-label="Category"></select>
+          </div>
+          <label class="toggle">
+            <input id="favorites-only" type="checkbox">
+            <span id="favorite-label">Favorites</span>
+          </label>
+        </section>
 
-    <div class="notice" id="notice" role="status" aria-live="polite" hidden></div>
-    <section class="results" id="results"></section>
+        <section class="vim-summary" aria-label="VSCodeVim status">
+          <div class="vim-summary-text">
+            <div class="vim-summary-title">VSCodeVim</div>
+            <div class="vim-summary-status" id="vim-summary-status"></div>
+          </div>
+          <button class="link" id="refresh-summary" type="button">Refresh</button>
+        </section>
+
+        <div class="guidance" id="guidance" role="status" aria-live="polite" hidden></div>
+        <section class="starter" id="starter" aria-label="Start here" hidden></section>
+        <div class="notice" id="notice" role="status" aria-live="polite" hidden></div>
+        <section class="results" id="results"></section>
 
     <section class="settings" aria-label="VSCodeVim settings">
       <div class="settings-header">
@@ -407,14 +520,21 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
     let currentModel = ${initialModel};
     let debounceHandle;
 
-    const searchInput = document.getElementById("search");
-    const categorySelect = document.getElementById("category");
-    const count = document.getElementById("count");
-    const notice = document.getElementById("notice");
-    const results = document.getElementById("results");
-    const settingsList = document.getElementById("settings-list");
-    const vimStatus = document.getElementById("vim-status");
-    const refresh = document.getElementById("refresh");
+        const searchInput = document.getElementById("search");
+        const stageSelect = document.getElementById("stage");
+        const categorySelect = document.getElementById("category");
+        const favoritesOnly = document.getElementById("favorites-only");
+        const favoriteLabel = document.getElementById("favorite-label");
+        const count = document.getElementById("count");
+        const guidance = document.getElementById("guidance");
+        const starter = document.getElementById("starter");
+        const notice = document.getElementById("notice");
+        const results = document.getElementById("results");
+        const settingsList = document.getElementById("settings-list");
+        const vimStatus = document.getElementById("vim-status");
+        const vimSummaryStatus = document.getElementById("vim-summary-status");
+        const refresh = document.getElementById("refresh");
+        const refreshSummary = document.getElementById("refresh-summary");
 
     window.addEventListener("message", (event) => {
       if (event.data?.type === "viewModel") {
@@ -426,28 +546,49 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
     searchInput.addEventListener("input", () => {
       window.clearTimeout(debounceHandle);
       debounceHandle = window.setTimeout(postFilter, 120);
-    });
+        });
 
-    categorySelect.addEventListener("change", postFilter);
-    refresh.addEventListener("click", () => vscode.postMessage({ type: "refreshConfig" }));
+        categorySelect.addEventListener("change", postFilter);
+        stageSelect.addEventListener("change", postFilter);
+        favoritesOnly.addEventListener("change", postFilter);
+        refresh.addEventListener("click", () => vscode.postMessage({ type: "refreshConfig" }));
+        refreshSummary.addEventListener("click", () => vscode.postMessage({ type: "refreshConfig" }));
 
-    function postFilter() {
-      vscode.postMessage({
-        type: "filter",
-        query: searchInput.value,
-        category: categorySelect.value
-      });
-    }
+        function postFilter() {
+          vscode.postMessage({
+            type: "filter",
+            query: searchInput.value,
+            category: categorySelect.value,
+            stage: stageSelect.value,
+            favoritesOnly: favoritesOnly.checked
+          });
+        }
 
-    function render(model) {
-      searchInput.value = model.query;
-      renderCategories(model);
-      renderSettings(model.vscodeVim);
-      renderNotice(model);
-      renderItems(model);
-      count.textContent = model.resultCount + "/" + model.totalCount;
-      count.setAttribute("aria-label", "Showing " + model.resultCount + " of " + model.totalCount + " guide items");
-    }
+        function render(model) {
+          searchInput.value = model.query;
+          favoritesOnly.checked = model.favoritesOnly;
+          favoriteLabel.textContent = "Favorites (" + model.favoriteCount + ")";
+          renderStages(model);
+          renderCategories(model);
+          renderSettings(model.vscodeVim);
+          renderGuidance(model);
+          renderStarter(model);
+          renderNotice();
+          renderItems(model);
+          count.textContent = model.resultCount + "/" + model.totalCount;
+          count.setAttribute("aria-label", "Showing " + model.resultCount + " of " + model.totalCount + " guide items");
+        }
+
+        function renderStages(model) {
+          stageSelect.replaceChildren();
+          for (const stage of model.stages) {
+            const option = document.createElement("option");
+            option.value = stage.id;
+            option.textContent = stage.label;
+            option.selected = stage.id === model.stage;
+            stageSelect.append(option);
+          }
+        }
 
     function renderCategories(model) {
       categorySelect.replaceChildren();
@@ -460,15 +601,18 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       }
     }
 
-    function renderSettings(snapshot) {
-      if (!snapshot.installed) {
-        vimStatus.textContent = "VSCodeVim extension not detected";
-      } else if (snapshot.configured) {
-        vimStatus.textContent = "extension detected, tracked settings found";
-      } else {
-        vimStatus.textContent = "extension detected, no tracked settings configured";
-      }
-      settingsList.replaceChildren();
+        function renderSettings(snapshot) {
+          let statusText;
+          if (!snapshot.installed) {
+            statusText = "VSCodeVim extension not detected";
+          } else if (snapshot.configured) {
+            statusText = "extension detected, tracked settings found";
+          } else {
+            statusText = "extension detected, no tracked settings configured";
+          }
+          vimSummaryStatus.textContent = statusText;
+          vimStatus.textContent = statusText;
+          settingsList.replaceChildren();
 
       for (const setting of snapshot.settings) {
         const row = document.createElement("div");
@@ -483,41 +627,77 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
         key.textContent = setting.key;
         labelWrap.append(label, key);
 
-        const value = document.createElement("div");
-        value.className = "setting-value " + setting.status;
-        value.textContent = setting.detail ? setting.value + " | " + setting.detail : setting.value;
+            const value = document.createElement("div");
+            value.className = "setting-value status-" + setting.status;
+            value.textContent = setting.detail ? setting.value + " | " + setting.detail : setting.value;
 
         row.append(labelWrap, value);
         settingsList.append(row);
-      }
-    }
+          }
+        }
 
-    function renderNotice(model) {
-      if (model.noResults) {
-        notice.hidden = true;
-        notice.textContent = "";
-        return;
-      }
+        function renderGuidance(model) {
+          if (model.guidanceText.length === 0) {
+            guidance.hidden = true;
+            guidance.textContent = "";
+            return;
+          }
 
-      if (model.emptyQuery) {
-        notice.hidden = false;
-        notice.textContent = "Showing all guide items.";
-        return;
-      }
+          guidance.hidden = false;
+          guidance.textContent = model.guidanceText;
+        }
 
-      notice.hidden = true;
-      notice.textContent = "";
-    }
+        function renderStarter(model) {
+          starter.replaceChildren();
+
+          if (model.starterItems.length === 0) {
+            starter.hidden = true;
+            return;
+          }
+
+          starter.hidden = false;
+          const title = document.createElement("div");
+          title.className = "starter-title";
+          title.textContent = "Start here";
+          const list = document.createElement("div");
+          list.className = "starter-list";
+
+          for (const item of model.starterItems) {
+            const chip = document.createElement("button");
+            chip.className = "starter-chip secondary";
+            chip.type = "button";
+            chip.title = item.title;
+            chip.setAttribute("aria-label", "Search " + item.title);
+            chip.addEventListener("click", () => {
+              searchInput.value = item.title;
+              postFilter();
+            });
+
+            const keys = document.createElement("code");
+            keys.textContent = item.keys;
+            const label = document.createElement("span");
+            label.textContent = item.title;
+            chip.append(keys, label);
+            list.append(chip);
+          }
+
+          starter.append(title, list);
+        }
+
+        function renderNotice() {
+          notice.hidden = true;
+          notice.textContent = "";
+        }
 
     function renderItems(model) {
       results.replaceChildren();
 
-      if (model.items.length === 0) {
-        const empty = document.createElement("div");
-        empty.className = "empty";
-        empty.textContent = describeNoResults(model);
-        results.append(empty);
-        return;
+          if (model.items.length === 0) {
+            const empty = document.createElement("div");
+            empty.className = "empty-results";
+            empty.textContent = describeNoResults(model);
+            results.append(empty);
+            return;
       }
 
       for (const item of model.items) {
@@ -531,12 +711,19 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       if (query.length > 0) {
         filters.push('search "' + query + '"');
       }
-      if (model.category !== "All") {
-        filters.push('category "' + model.category + '"');
-      }
+          if (model.category !== "All") {
+            filters.push('category "' + model.category + '"');
+          }
+          if (model.stage !== "All") {
+            const selectedStage = model.stages.find((stage) => stage.id === model.stage);
+            filters.push('stage "' + (selectedStage?.label ?? model.stage) + '"');
+          }
+          if (model.favoritesOnly) {
+            filters.push("favorites");
+          }
 
-      return filters.length > 0 ? "No matches for " + filters.join(" and ") + "." : "No guide items available.";
-    }
+          return filters.length > 0 ? "No matches for " + filters.join(" and ") + "." : "No guide items available.";
+        }
 
     function renderItem(item) {
       const card = document.createElement("article");
@@ -569,9 +756,13 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       description.className = "description";
       description.textContent = item.description;
 
-      const meta = document.createElement("div");
-      meta.className = "meta";
-      meta.textContent = item.category + " / " + item.type + " / " + item.source;
+          const meta = document.createElement("div");
+          meta.className = "meta";
+          meta.append(
+            renderBadge(item.stageLabel, "secondary-badge"),
+            renderBadge(item.category, "secondary-badge"),
+            renderBadge(item.actionLabel, item.executable ? "" : "secondary-badge")
+          );
 
       const actions = document.createElement("div");
       actions.className = "actions";
@@ -595,9 +786,16 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
         actions.append(run);
       }
 
-      card.append(head, description, meta, actions);
-      return card;
-    }
+          card.append(head, description, meta, actions);
+          return card;
+        }
+
+        function renderBadge(text, className) {
+          const badge = document.createElement("span");
+          badge.className = className ? "badge " + className : "badge";
+          badge.textContent = text;
+          return badge;
+        }
 
     render(currentModel);
     vscode.postMessage({ type: "ready" });
