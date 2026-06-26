@@ -1,3 +1,4 @@
+import { randomBytes } from "crypto";
 import * as vscode from "vscode";
 import { ALL_CATEGORY, GuideService } from "../services/guideService";
 
@@ -43,7 +44,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
   }
 
   public refresh(): void {
-    void this.postViewModel();
+    void this.postViewModel().catch((error: unknown) => this.handleMessageError(error));
   }
 
   private async handleMessage(message: WebviewMessage): Promise<void> {
@@ -375,13 +376,16 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
   <main class="shell">
     <div class="title-row">
       <h1>Vim Guide</h1>
-      <span class="count" id="count"></span>
+      <span class="count" id="count" role="status" aria-live="polite"></span>
     </div>
 
     <section class="controls" aria-label="Filters">
       <input id="search" type="search" placeholder="Search title, keys, category, tags" autocomplete="off" aria-label="Search guide items">
       <select id="category" aria-label="Category"></select>
     </section>
+
+    <div class="notice" id="notice" role="status" aria-live="polite" hidden></div>
+    <section class="results" id="results"></section>
 
     <section class="settings" aria-label="VSCodeVim settings">
       <div class="settings-header">
@@ -391,9 +395,6 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       <div class="settings-status" id="vim-status"></div>
       <div class="settings-list" id="settings-list"></div>
     </section>
-
-    <div class="notice" id="notice" hidden></div>
-    <section class="results" id="results" aria-live="polite"></section>
   </main>
 
   <script nonce="${nonce}">
@@ -438,8 +439,9 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       renderCategories(model);
       renderSettings(model.vscodeVim);
       renderNotice(model);
-      renderItems(model.items);
+      renderItems(model);
       count.textContent = model.resultCount + "/" + model.totalCount;
+      count.setAttribute("aria-label", "Showing " + model.resultCount + " of " + model.totalCount + " guide items");
     }
 
     function renderCategories(model) {
@@ -454,7 +456,13 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
     }
 
     function renderSettings(snapshot) {
-      vimStatus.textContent = snapshot.installed ? "extension detected" : "VSCodeVim extension not detected";
+      if (!snapshot.installed) {
+        vimStatus.textContent = "VSCodeVim extension not detected";
+      } else if (snapshot.configured) {
+        vimStatus.textContent = "extension detected, tracked settings found";
+      } else {
+        vimStatus.textContent = "extension detected, no tracked settings configured";
+      }
       settingsList.replaceChildren();
 
       for (const setting of snapshot.settings) {
@@ -496,20 +504,33 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       notice.textContent = "";
     }
 
-    function renderItems(items) {
+    function renderItems(model) {
       results.replaceChildren();
 
-      if (items.length === 0) {
+      if (model.items.length === 0) {
         const empty = document.createElement("div");
         empty.className = "empty";
-        empty.textContent = "No matches for the current search and category.";
+        empty.textContent = describeNoResults(model);
         results.append(empty);
         return;
       }
 
-      for (const item of items) {
+      for (const item of model.items) {
         results.append(renderItem(item));
       }
+    }
+
+    function describeNoResults(model) {
+      const filters = [];
+      const query = model.query.trim();
+      if (query.length > 0) {
+        filters.push('search "' + query + '"');
+      }
+      if (model.category !== "All") {
+        filters.push('category "' + model.category + '"');
+      }
+
+      return filters.length > 0 ? "No matches for " + filters.join(" and ") + "." : "No guide items available.";
     }
 
     function renderItem(item) {
@@ -534,7 +555,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       favorite.textContent = item.favorite ? "Unfavorite" : "Favorite";
       favorite.title = item.favorite ? "Remove from favorites" : "Add to favorites";
       favorite.setAttribute("aria-pressed", item.favorite ? "true" : "false");
-      favorite.setAttribute("aria-label", (item.favorite ? "Remove favorite for " : "Add favorite for ") + item.title);
+      favorite.setAttribute("aria-label", "Toggle favorite for " + item.title);
       favorite.addEventListener("click", () => vscode.postMessage({ type: "toggleFavorite", id: item.id }));
 
       head.append(titleWrap, favorite);
@@ -582,14 +603,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
 }
 
 function getNonce(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let nonce = "";
-
-  for (let i = 0; i < 32; i += 1) {
-    nonce += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-
-  return nonce;
+  return randomBytes(16).toString("hex");
 }
 
 function isWebviewMessage(value: unknown): value is WebviewMessage {

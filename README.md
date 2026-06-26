@@ -84,19 +84,19 @@ The webview sends guide item ids to the extension host. It never sends arbitrary
 | Git repository initialized | `git status --short --branch` |
 | Baseline commit and feature diff exist | `git log --oneline`, `git diff --stat HEAD~1..HEAD` |
 | Activity Bar shows `Vim Guide` | `package.json` contributions, Extension Development Host smoke |
-| Sidebar renders initial list | `GuideViewProvider` fake webview test, Extension Development Host smoke |
+| Sidebar renders initial list | `GuideViewProvider` fake webview HTML/model test; actual DOM render is covered by the Extension Development Host checklist |
 | Search fields covered | `GuideService` seed and fixture tests |
 | Category filter | `GuideService` tests |
-| Empty query and no-results states | `GuideService` view model tests, `GuideViewProvider` tests |
+| Empty query and no-results states | `GuideService` view model tests, `GuideViewProvider` HTML/message tests, Extension Development Host checklist |
 | Favorites add/remove and persist | `GuideService` state tests, `GuideViewProvider` message tests |
 | 40 to 60 Vim command/tip seed items | data count test |
 | 10 to 15 VS Code command seed items | data count test |
 | Required item fields | data schema test |
-| VSCodeVim settings displayed | parser tests, `GuideViewProvider` HTML/settings tests |
+| VSCodeVim settings displayed | parser tests, `GuideViewProvider` settings container/status tests; actual rendered settings rows are covered by the Extension Development Host checklist |
 | Missing or malformed VSCodeVim config is safe | parser exact-status tests |
 | Only allowlisted commands execute | allowlist positive/negative tests, webview run message test |
 | Non-executable Vim actions avoid Run buttons | data/service executable model tests |
 | Compile, lint, test pass | `npm run compile`, `npm run lint`, `npm test`, `npm run verify` |
 | Package smoke | `npm run package`, `npm run verify` |
 | README coverage | this file |
-| deep-code-review and pr-review clean | harness review reports |
+| deep-code-review and pr-review clean | home harness workspace review reports |

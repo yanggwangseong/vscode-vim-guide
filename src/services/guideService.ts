@@ -6,6 +6,8 @@ export const FAVORITES_KEY = "vimGuide.favoriteIds.v1";
 const MAX_BINDING_ENTRIES_TO_INSPECT = 100;
 const MAX_BINDING_SAMPLES = 3;
 const MAX_SUMMARY_TEXT_LENGTH = 80;
+const MAX_BINDING_ENTRY_TEXT_LENGTH = 120;
+const MAX_NESTED_SETTING_ITEMS = 12;
 
 export const ALLOWED_VSCODE_COMMANDS = new Set<string>([
   "workbench.action.quickOpen",
@@ -69,6 +71,16 @@ interface GuideServiceOptions {
   readonly configurationReader?: () => ConfigurationReader;
   readonly extensionInstalled?: () => boolean;
   readonly executeCommand?: (command: string) => Thenable<unknown>;
+}
+
+interface BindingEntrySummary {
+  readonly text: string;
+  readonly valid: boolean;
+}
+
+interface ArraySummary {
+  readonly text?: string;
+  readonly invalid: boolean;
 }
 
 export class GuideService {
@@ -227,7 +239,7 @@ function summarizeStringSetting(key: string, label: string, value: unknown): Set
     return { key, label, status: "invalid", value: "invalid", detail: "Expected a string value." };
   }
 
-  return { key, label, status: "ok", value };
+  return { key, label, status: "ok", value: truncateSummary(value) };
 }
 
 function summarizeBooleanSetting(key: string, label: string, value: unknown): SettingSummary {
@@ -257,8 +269,8 @@ function summarizeBindingSetting(key: string, label: string, value: unknown): Se
 
   const inspected = value.slice(0, MAX_BINDING_ENTRIES_TO_INSPECT);
   const summaries = inspected.map(summarizeBindingEntry);
-  const samples = summaries.slice(0, MAX_BINDING_SAMPLES);
-  const invalidCount = summaries.filter((sample) => sample === "invalid binding").length;
+  const samples = summaries.slice(0, MAX_BINDING_SAMPLES).map((summary) => summary.text);
+  const invalidCount = summaries.filter((summary) => !summary.valid).length;
   const remainingCount = value.length - inspected.length;
   const detailParts = [...samples];
 
@@ -275,48 +287,72 @@ function summarizeBindingSetting(key: string, label: string, value: unknown): Se
   };
 }
 
-function summarizeBindingEntry(entry: unknown): string {
+function summarizeBindingEntry(entry: unknown): BindingEntrySummary {
   if (!isRecord(entry)) {
-    return "invalid binding";
+    return { text: "invalid binding", valid: false };
   }
 
   const before = summarizeKeySequence(entry.before);
   const after = summarizeKeySequence(entry.after);
   const commands = summarizeCommandList(entry.commands);
-  const target = after ?? commands ?? "custom action";
+  const targetText = after.text ?? commands.text;
+  const valid = before.text !== undefined && targetText !== undefined;
 
-  return truncateSummary(`${before ?? "keys"} -> ${target}`);
-}
-
-function summarizeKeySequence(value: unknown): string | undefined {
-  if (!Array.isArray(value)) {
-    return undefined;
+  if (before.invalid || after.invalid || commands.invalid || !valid) {
+    return { text: "invalid binding", valid: false };
   }
 
-  const keys = value.filter((part): part is string => typeof part === "string");
-  return keys.length > 0 ? truncateSummary(keys.join(" ")) : undefined;
+  return { text: truncateBindingEntry(`${before.text} -> ${targetText}`), valid: true };
 }
 
-function summarizeCommandList(value: unknown): string | undefined {
-  if (!Array.isArray(value)) {
-    return undefined;
+function summarizeKeySequence(value: unknown): ArraySummary {
+  if (value === undefined) {
+    return { invalid: false };
   }
 
-  const commands = value
-    .map((entry) => {
+  if (!Array.isArray(value)) {
+    return { invalid: true };
+  }
+
+  const inspected = value.slice(0, MAX_NESTED_SETTING_ITEMS);
+  const keys = inspected.filter((part): part is string => typeof part === "string").map(truncateSummary);
+  const omittedCount = value.length - inspected.length;
+  if (keys.length === 0 || keys.length !== inspected.length) {
+    return { invalid: true };
+  }
+
+  return { text: appendOmittedCount(keys.join(" "), omittedCount), invalid: false };
+}
+
+function summarizeCommandList(value: unknown): ArraySummary {
+  if (value === undefined) {
+    return { invalid: false };
+  }
+
+  if (!Array.isArray(value)) {
+    return { invalid: true };
+  }
+
+  const inspected = value.slice(0, MAX_NESTED_SETTING_ITEMS);
+  const commands = inspected
+    .map((entry): string | undefined => {
       if (typeof entry === "string") {
-        return entry;
+        return truncateSummary(entry);
       }
 
       if (isRecord(entry) && typeof entry.command === "string") {
-        return entry.command;
+        return truncateSummary(entry.command);
       }
 
       return undefined;
     })
     .filter((entry): entry is string => entry !== undefined);
+  const omittedCount = value.length - inspected.length;
+  if (commands.length === 0 || commands.length !== inspected.length) {
+    return { invalid: true };
+  }
 
-  return commands.length > 0 ? truncateSummary(commands.join(", ")) : undefined;
+  return { text: appendOmittedCount(commands.join(", "), omittedCount), invalid: false };
 }
 
 function searchableText(item: GuideItem): string {
@@ -328,11 +364,30 @@ function normalize(value: string): string {
 }
 
 function truncateSummary(value: string): string {
-  if (value.length <= MAX_SUMMARY_TEXT_LENGTH) {
+  return truncateText(value, MAX_SUMMARY_TEXT_LENGTH);
+}
+
+function truncateBindingEntry(value: string): string {
+  return truncateText(value, MAX_BINDING_ENTRY_TEXT_LENGTH);
+}
+
+function truncateText(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
     return value;
   }
 
-  return `${value.slice(0, MAX_SUMMARY_TEXT_LENGTH - 3)}...`;
+  return `${value.slice(0, maxLength - 3)}...`;
+}
+
+function appendOmittedCount(value: string, omittedCount: number): string {
+  const suffix = omittedCount > 0 ? ` (+${omittedCount} more)` : "";
+  if (suffix.length === 0) {
+    return truncateSummary(value);
+  }
+
+  const maxValueLength = Math.max(0, MAX_SUMMARY_TEXT_LENGTH - suffix.length);
+  const visibleValue = value.length <= maxValueLength ? value : `${value.slice(0, Math.max(0, maxValueLength - 3))}...`;
+  return `${visibleValue}${suffix}`;
 }
 
 function favoriteStorageMatches(stored: unknown, favorites: readonly string[]): boolean {

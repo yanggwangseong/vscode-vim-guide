@@ -376,6 +376,48 @@ suite("VSCodeVim config parsing", () => {
     assert.ok(setting?.detail?.includes("Only first 100 bindings inspected; 50 more omitted."));
     assert.ok((setting?.detail?.length ?? 0) < 420);
   });
+
+  test("limits nested VSCodeVim binding arrays and long string settings", () => {
+    const commands = Array.from({ length: 30 }, (_, index) => `fixture.command.${index}`);
+    const snapshot = parseVscodeVimConfig(
+      mapConfig({
+        leader: "x".repeat(500),
+        normalModeKeyBindings: [{ before: ["<leader>"], commands }]
+      }),
+      true
+    );
+    const leader = snapshot.settings.find((setting) => setting.key === "vim.leader");
+    const normalBindings = snapshot.settings.find((setting) => setting.key === "vim.normalModeKeyBindings");
+
+    assert.strictEqual(leader?.status, "ok");
+    assert.ok((leader?.value.length ?? 0) <= 80);
+    assert.ok(leader?.value.endsWith("..."));
+    assert.strictEqual(normalBindings?.status, "ok");
+    assert.ok(normalBindings?.detail?.includes("(+18 more)"));
+    assert.ok((normalBindings?.detail?.length ?? 0) < 180);
+  });
+
+  test("marks malformed VSCodeVim binding objects invalid", () => {
+    const snapshot = parseVscodeVimConfig(
+      mapConfig({
+        normalModeKeyBindings: [{}],
+        visualModeKeyBindings: [{ before: "bad" }],
+        insertModeKeyBindings: [{ before: ["j", "k"], after: ["<Esc>"] }]
+      }),
+      true
+    );
+
+    assert.deepStrictEqual(
+      snapshot.settings
+        .filter((setting) => setting.key.endsWith("ModeKeyBindings"))
+        .map((setting) => [setting.key, setting.status, setting.detail ?? ""]),
+      [
+        ["vim.normalModeKeyBindings", "invalid", "invalid binding"],
+        ["vim.visualModeKeyBindings", "invalid", "invalid binding"],
+        ["vim.insertModeKeyBindings", "ok", "j k -> <Esc>"]
+      ]
+    );
+  });
 });
 
 suite("GuideViewProvider", () => {
@@ -392,7 +434,12 @@ suite("GuideViewProvider", () => {
     assert.ok(fake.webview.html.includes('aria-label="Search guide items"'));
     assert.ok(fake.webview.html.includes('id="settings-list"'));
     assert.ok(fake.webview.html.includes('id="results"'));
+    assert.ok(!fake.webview.html.includes('id="results" aria-live'));
+    assert.ok(fake.webview.html.includes('id="count" role="status" aria-live="polite"'));
+    assert.ok(fake.webview.html.includes("describeNoResults"));
+    assert.ok(fake.webview.html.includes("Toggle favorite for "));
     assert.ok(fake.webview.html.includes('"totalCount":60'));
+    assert.ok(fake.webview.html.indexOf('id="results"') < fake.webview.html.indexOf('class="settings"'));
   });
 
   test("posts updated view models for ready, filter, and favorite messages", async () => {
