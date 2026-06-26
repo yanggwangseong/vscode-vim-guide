@@ -3,6 +3,9 @@ import { GuideItem, guideItems } from "../data/guideData";
 
 export const ALL_CATEGORY = "All";
 export const FAVORITES_KEY = "vimGuide.favoriteIds.v1";
+const MAX_BINDING_ENTRIES_TO_INSPECT = 100;
+const MAX_BINDING_SAMPLES = 3;
+const MAX_SUMMARY_TEXT_LENGTH = 80;
 
 export const ALLOWED_VSCODE_COMMANDS = new Set<string>([
   "workbench.action.quickOpen",
@@ -14,7 +17,7 @@ export const ALLOWED_VSCODE_COMMANDS = new Set<string>([
   "editor.action.startFindReplaceAction",
   "workbench.action.terminal.toggleTerminal",
   "workbench.action.togglePanel",
-  "workbench.action.files.save",
+  "workbench.action.navigateBack",
   "workbench.action.closeActiveEditor",
   "workbench.action.nextEditor"
 ]);
@@ -100,11 +103,17 @@ export class GuideService {
 
   public getFavoriteIds(): readonly string[] {
     const stored = this.state.get<unknown>(FAVORITES_KEY, []);
-    if (!Array.isArray(stored)) {
-      return [];
+    const favorites = Array.isArray(stored)
+      ? Array.from(new Set(stored.filter((id): id is string => typeof id === "string" && this.itemMap.has(id)))).sort()
+      : [];
+
+    if (!favoriteStorageMatches(stored, favorites)) {
+      void this.state.update(FAVORITES_KEY, favorites).then(undefined, () => {
+        // Favor rendering a clean model over surfacing storage cleanup failures.
+      });
     }
 
-    return stored.filter((id): id is string => typeof id === "string" && this.itemMap.has(id));
+    return favorites;
   }
 
   public async toggleFavorite(id: string): Promise<boolean> {
@@ -246,16 +255,23 @@ function summarizeBindingSetting(key: string, label: string, value: unknown): Se
     return { key, label, status: "empty", value: "0 bindings" };
   }
 
-  const summaries = value.map(summarizeBindingEntry);
-  const samples = summaries.slice(0, 3);
+  const inspected = value.slice(0, MAX_BINDING_ENTRIES_TO_INSPECT);
+  const summaries = inspected.map(summarizeBindingEntry);
+  const samples = summaries.slice(0, MAX_BINDING_SAMPLES);
   const invalidCount = summaries.filter((sample) => sample === "invalid binding").length;
+  const remainingCount = value.length - inspected.length;
+  const detailParts = [...samples];
+
+  if (remainingCount > 0) {
+    detailParts.push(`Only first ${MAX_BINDING_ENTRIES_TO_INSPECT} bindings inspected; ${remainingCount} more omitted.`);
+  }
 
   return {
     key,
     label,
     status: invalidCount > 0 ? "invalid" : "ok",
     value: `${value.length} binding${value.length === 1 ? "" : "s"}`,
-    detail: samples.join("; ")
+    detail: detailParts.join("; ")
   };
 }
 
@@ -269,7 +285,7 @@ function summarizeBindingEntry(entry: unknown): string {
   const commands = summarizeCommandList(entry.commands);
   const target = after ?? commands ?? "custom action";
 
-  return `${before ?? "keys"} -> ${target}`;
+  return truncateSummary(`${before ?? "keys"} -> ${target}`);
 }
 
 function summarizeKeySequence(value: unknown): string | undefined {
@@ -278,7 +294,7 @@ function summarizeKeySequence(value: unknown): string | undefined {
   }
 
   const keys = value.filter((part): part is string => typeof part === "string");
-  return keys.length > 0 ? keys.join(" ") : undefined;
+  return keys.length > 0 ? truncateSummary(keys.join(" ")) : undefined;
 }
 
 function summarizeCommandList(value: unknown): string | undefined {
@@ -300,7 +316,7 @@ function summarizeCommandList(value: unknown): string | undefined {
     })
     .filter((entry): entry is string => entry !== undefined);
 
-  return commands.length > 0 ? commands.join(", ") : undefined;
+  return commands.length > 0 ? truncateSummary(commands.join(", ")) : undefined;
 }
 
 function searchableText(item: GuideItem): string {
@@ -309,6 +325,18 @@ function searchableText(item: GuideItem): string {
 
 function normalize(value: string): string {
   return value.trim().toLocaleLowerCase();
+}
+
+function truncateSummary(value: string): string {
+  if (value.length <= MAX_SUMMARY_TEXT_LENGTH) {
+    return value;
+  }
+
+  return `${value.slice(0, MAX_SUMMARY_TEXT_LENGTH - 3)}...`;
+}
+
+function favoriteStorageMatches(stored: unknown, favorites: readonly string[]): boolean {
+  return Array.isArray(stored) && stored.length === favorites.length && stored.every((id, index) => id === favorites[index]);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

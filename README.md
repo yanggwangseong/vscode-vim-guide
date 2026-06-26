@@ -40,6 +40,7 @@ npm install
 npm run compile
 npm run lint
 npm test
+npm run verify
 ```
 
 Package smoke uses the local `@vscode/vsce` dev dependency:
@@ -83,19 +84,19 @@ The webview sends guide item ids to the extension host. It never sends arbitrary
 | Git repository initialized | `git status --short --branch` |
 | Baseline commit and feature diff exist | `git log --oneline`, `git diff --stat HEAD~1..HEAD` |
 | Activity Bar shows `Vim Guide` | `package.json` contributions, Extension Development Host smoke |
-| Sidebar renders initial list | Extension activation test, Extension Development Host smoke |
-| Search fields covered | `GuideService` tests |
-| Category filter | `GuideService` tests, manual smoke |
-| Empty query and no-results states | `GuideService` view model tests, manual smoke |
-| Favorites add/remove and persist | `GuideService` state tests, manual smoke |
+| Sidebar renders initial list | `GuideViewProvider` fake webview test, Extension Development Host smoke |
+| Search fields covered | `GuideService` seed and fixture tests |
+| Category filter | `GuideService` tests |
+| Empty query and no-results states | `GuideService` view model tests, `GuideViewProvider` tests |
+| Favorites add/remove and persist | `GuideService` state tests, `GuideViewProvider` message tests |
 | 40 to 60 Vim command/tip seed items | data count test |
 | 10 to 15 VS Code command seed items | data count test |
 | Required item fields | data schema test |
-| VSCodeVim settings displayed | parser tests, manual smoke |
-| Missing or malformed VSCodeVim config is safe | parser tests |
-| Only allowlisted commands execute | allowlist tests |
-| Non-executable Vim actions avoid Run buttons | data/service tests, manual smoke |
-| Compile, lint, test pass | `npm run compile`, `npm run lint`, `npm test` |
-| Package smoke | `npm run package` |
+| VSCodeVim settings displayed | parser tests, `GuideViewProvider` HTML/settings tests |
+| Missing or malformed VSCodeVim config is safe | parser exact-status tests |
+| Only allowlisted commands execute | allowlist positive/negative tests, webview run message test |
+| Non-executable Vim actions avoid Run buttons | data/service executable model tests |
+| Compile, lint, test pass | `npm run compile`, `npm run lint`, `npm test`, `npm run verify` |
+| Package smoke | `npm run package`, `npm run verify` |
 | README coverage | this file |
 | deep-code-review and pr-review clean | harness review reports |

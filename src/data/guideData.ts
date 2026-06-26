@@ -595,15 +595,15 @@ export const guideItems: readonly GuideItem[] = [
     command: "workbench.action.togglePanel"
   },
   {
-    id: "vscode-command-save",
-    title: "Save active file",
-    keys: "Cmd+S",
+    id: "vscode-command-navigate-back",
+    title: "Navigate back",
+    keys: "Ctrl+-",
     category: "VS Code Commands",
-    description: "Save the active editor.",
+    description: "Move focus back to the previous editor location.",
     source: "vscode",
     type: "vscode-command",
-    tags: ["save", "file", "editor"],
-    command: "workbench.action.files.save"
+    tags: ["navigation", "history", "editor"],
+    command: "workbench.action.navigateBack"
   },
   {
     id: "vscode-command-close-editor",

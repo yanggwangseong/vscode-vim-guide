@@ -23,6 +23,12 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
 
   public resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
+    webviewView.onDidDispose(() => {
+      if (this.view === webviewView) {
+        this.view = undefined;
+      }
+    });
+
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: [this.extensionUri]
@@ -31,7 +37,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = this.getHtml();
     webviewView.webview.onDidReceiveMessage((message: unknown) => {
       if (isWebviewMessage(message)) {
-        void this.handleMessage(message);
+        void this.handleMessage(message).catch((error: unknown) => this.handleMessageError(error));
       }
     });
   }
@@ -90,7 +96,18 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
     }
 
     const model = this.guideService.createViewModel(this.query, this.category);
-    await this.view.webview.postMessage({ type: "viewModel", model });
+    const delivered = await this.view.webview.postMessage({ type: "viewModel", model });
+    if (!delivered) {
+      void vscode.window.showWarningMessage("Vim Guide could not update the sidebar view. Reopen the view if it appears stale.");
+    }
+  }
+
+  private handleMessageError(error: unknown): void {
+    const message = error instanceof Error ? error.message : "Unexpected Vim Guide sidebar error.";
+    void vscode.window.showWarningMessage(`Vim Guide: ${message}`);
+    void this.postViewModel().catch(() => {
+      // If recovery sync also fails, VS Code will retry on the next webview ready/refresh message.
+    });
   }
 
   private getHtml(): string {
@@ -255,8 +272,14 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       align-items: start;
     }
 
+    .setting-label {
+      color: var(--vscode-foreground);
+      overflow-wrap: anywhere;
+    }
+
     .setting-key {
       color: var(--vscode-descriptionForeground);
+      font-size: 12px;
       overflow-wrap: anywhere;
     }
 
@@ -335,6 +358,17 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       color: var(--vscode-descriptionForeground);
       text-align: center;
     }
+
+    @media (max-width: 280px) {
+      body {
+        padding: 10px;
+      }
+
+      .setting {
+        grid-template-columns: 1fr;
+        gap: 2px;
+      }
+    }
   </style>
 </head>
 <body>
@@ -345,7 +379,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
     </div>
 
     <section class="controls" aria-label="Filters">
-      <input id="search" type="search" placeholder="Search title, keys, category, tags" autocomplete="off">
+      <input id="search" type="search" placeholder="Search title, keys, category, tags" autocomplete="off" aria-label="Search guide items">
       <select id="category" aria-label="Category"></select>
     </section>
 
@@ -420,30 +454,35 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
     }
 
     function renderSettings(snapshot) {
-      vimStatus.textContent = snapshot.installed ? "extension detected" : "extension not detected";
+      vimStatus.textContent = snapshot.installed ? "extension detected" : "VSCodeVim extension not detected";
       settingsList.replaceChildren();
 
       for (const setting of snapshot.settings) {
         const row = document.createElement("div");
         row.className = "setting";
 
+        const labelWrap = document.createElement("div");
+        const label = document.createElement("div");
+        label.className = "setting-label";
+        label.textContent = setting.label;
         const key = document.createElement("div");
         key.className = "setting-key";
         key.textContent = setting.key;
+        labelWrap.append(label, key);
 
         const value = document.createElement("div");
         value.className = "setting-value " + setting.status;
         value.textContent = setting.detail ? setting.value + " | " + setting.detail : setting.value;
 
-        row.append(key, value);
+        row.append(labelWrap, value);
         settingsList.append(row);
       }
     }
 
     function renderNotice(model) {
       if (model.noResults) {
-        notice.hidden = false;
-        notice.textContent = "No matches for the current search and category.";
+        notice.hidden = true;
+        notice.textContent = "";
         return;
       }
 
@@ -463,7 +502,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       if (items.length === 0) {
         const empty = document.createElement("div");
         empty.className = "empty";
-        empty.textContent = "No results";
+        empty.textContent = "No matches for the current search and category.";
         results.append(empty);
         return;
       }
@@ -494,6 +533,8 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       favorite.type = "button";
       favorite.textContent = item.favorite ? "Unfavorite" : "Favorite";
       favorite.title = item.favorite ? "Remove from favorites" : "Add to favorites";
+      favorite.setAttribute("aria-pressed", item.favorite ? "true" : "false");
+      favorite.setAttribute("aria-label", (item.favorite ? "Remove favorite for " : "Add favorite for ") + item.title);
       favorite.addEventListener("click", () => vscode.postMessage({ type: "toggleFavorite", id: item.id }));
 
       head.append(titleWrap, favorite);
@@ -514,6 +555,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       copy.type = "button";
       copy.textContent = "Copy";
       copy.title = "Copy keys";
+      copy.setAttribute("aria-label", "Copy keys for " + item.title);
       copy.addEventListener("click", () => vscode.postMessage({ type: "copy", id: item.id }));
       actions.append(copy);
 
@@ -521,7 +563,8 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
         const run = document.createElement("button");
         run.type = "button";
         run.textContent = "Run";
-        run.title = "Run allowlisted VS Code command";
+        run.title = "Run VS Code command";
+        run.setAttribute("aria-label", "Run " + item.title);
         run.addEventListener("click", () => vscode.postMessage({ type: "run", id: item.id }));
         actions.append(run);
       }

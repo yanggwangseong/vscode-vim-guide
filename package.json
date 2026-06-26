@@ -53,6 +53,7 @@
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
     "test": "npm run compile && node ./out/test/runTest.js",
+    "verify": "npm run compile && npm run lint && npm test && npm run package",
     "package": "vsce package --no-dependencies --out dist/vscode-vim-guide-0.0.1.vsix"
   },
   "devDependencies": {
@@ -66,5 +67,8 @@
     "eslint": "^8.57.1",
     "mocha": "^10.8.2",
     "typescript": "^5.8.3"
+  },
+  "overrides": {
+    "serialize-javascript": "^7.0.6"
   }
 }
