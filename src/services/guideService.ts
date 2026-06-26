@@ -1,10 +1,12 @@
 import * as vscode from "vscode";
+import { DEFAULT_GUIDE_LESSON_ID, GuideLesson, guideLessons } from "../data/guideCurriculum";
 import { GuideItem, GuideItemStage, guideItemStages, guideItems } from "../data/guideData";
 import {
   GuideLanguage,
   GuideLanguageOption,
   getActionLabel,
   getCategoryLabel,
+  getGuideLessonText,
   getGuideItemText,
   getStageLabel,
   guideLanguageOptions,
@@ -20,30 +22,6 @@ const MAX_BINDING_SAMPLES = 3;
 const MAX_SUMMARY_TEXT_LENGTH = 80;
 const MAX_BINDING_ENTRY_TEXT_LENGTH = 120;
 const MAX_NESTED_SETTING_ITEMS = 12;
-const STARTER_ITEM_IDS = [
-  "vim-mode-insert-before",
-  "vim-motion-word-forward",
-  "vim-edit-delete-line",
-  "vim-edit-yank-line",
-  "vscode-command-quick-open"
-] as const;
-const LEARNING_PATH_ITEM_IDS: Readonly<Record<GuideItemStage, readonly string[]>> = {
-  beginner: STARTER_ITEM_IDS,
-  productive: [
-    "vim-search-forward",
-    "vim-search-next",
-    "vim-text-object-inner-word",
-    "vim-register-system",
-    "vscode-command-find-files"
-  ],
-  advanced: [
-    "vim-macro-record",
-    "vim-macro-play",
-    "vim-window-move-left",
-    "vscodevim-leader-tip",
-    "vscodevim-keybindings-tip"
-  ]
-};
 const CATEGORY_ORDER = [
   "Modes",
   "Motions",
@@ -59,6 +37,7 @@ const CATEGORY_ORDER = [
 ] as const;
 
 export const ALLOWED_VSCODE_COMMANDS = new Set<string>([
+  "workbench.action.files.save",
   "workbench.action.quickOpen",
   "workbench.action.showCommands",
   "workbench.action.gotoLine",
@@ -92,19 +71,22 @@ export interface GuideItemViewModel extends GuideItem {
   readonly actionLabel: string;
 }
 
-export interface GuideLearningPathStep {
+export interface GuideLessonViewModel {
+  readonly id: string;
   readonly stage: GuideItemStage;
-  readonly label: string;
+  readonly stageLabel: string;
   readonly title: string;
   readonly description: string;
+  readonly practicePrompt: string;
   readonly readinessHint: string;
-  readonly focusActionLabel: string;
   readonly itemCount: number;
   readonly active: boolean;
-  readonly focusItems: readonly GuideItemViewModel[];
+  readonly initiallyOpen: boolean;
+  readonly items: readonly GuideItemViewModel[];
 }
 
 export type GuideStageFilter = typeof ALL_STAGE | GuideItemStage;
+export type GuideViewMode = "practice" | "all";
 
 export interface GuideStageOption {
   readonly id: GuideStageFilter;
@@ -117,6 +99,8 @@ export interface GuideFilterInput {
   readonly stage?: unknown;
   readonly favoritesOnly?: unknown;
   readonly language?: unknown;
+  readonly viewMode?: unknown;
+  readonly lesson?: unknown;
 }
 
 export interface GuideFilters {
@@ -125,6 +109,8 @@ export interface GuideFilters {
   readonly stage: GuideStageFilter;
   readonly favoritesOnly: boolean;
   readonly language: GuideLanguage;
+  readonly viewMode: GuideViewMode;
+  readonly lesson: string;
 }
 
 export interface GuideCategoryOption {
@@ -141,8 +127,18 @@ export interface GuideUiText {
   readonly categoryAriaLabel: string;
   readonly favorites: string;
   readonly startHere: string;
-  readonly learningPathTitle: string;
-  readonly learningPathIntro: string;
+  readonly curriculumTitle: string;
+  readonly curriculumIntro: string;
+  readonly currentLesson: string;
+  readonly practicePrompt: string;
+  readonly readiness: string;
+  readonly lessonItemsLabel: string;
+  readonly practiceThisLesson: string;
+  readonly practicingNow: string;
+  readonly showAllCommands: string;
+  readonly practiceModeLabel: string;
+  readonly referenceModeLabel: string;
+  readonly resultsTitle: string;
   readonly focusItemsLabel: string;
   readonly currentLevel: string;
   readonly refresh: string;
@@ -175,6 +171,8 @@ export interface GuideViewModel {
   readonly stage: GuideStageFilter;
   readonly stages: readonly GuideStageOption[];
   readonly favoritesOnly: boolean;
+  readonly viewMode: GuideViewMode;
+  readonly lesson: string;
   readonly categories: readonly string[];
   readonly categoryOptions: readonly GuideCategoryOption[];
   readonly totalCount: number;
@@ -183,8 +181,8 @@ export interface GuideViewModel {
   readonly emptyQuery: boolean;
   readonly noResults: boolean;
   readonly items: readonly GuideItemViewModel[];
-  readonly starterItems: readonly GuideItemViewModel[];
-  readonly learningPath: readonly GuideLearningPathStep[];
+  readonly lessons: readonly GuideLessonViewModel[];
+  readonly currentLesson?: GuideLessonViewModel;
   readonly guidanceText: string;
   readonly ui: GuideUiText;
   readonly vscodeVim: VscodeVimSnapshot;
@@ -340,16 +338,19 @@ export class GuideService {
   }
 
   public createViewModel(queryOrFilters: string | GuideFilterInput = "", category = ALL_CATEGORY): GuideViewModel {
-    const filters = normalizeGuideFilters(
+    const normalizedFilters = normalizeGuideFilters(
       typeof queryOrFilters === "string" ? { query: queryOrFilters, category } : queryOrFilters,
       this.getLanguage()
     );
+    const currentLesson = this.resolveCurrentLesson(normalizedFilters.lesson, normalizedFilters.stage);
+    const filters: GuideFilters = { ...normalizedFilters, lesson: currentLesson.id };
     const favoriteIds = new Set(this.getFavoriteIds());
-    const results = this.searchItems(filters)
+    const referenceResults = this.searchItems(filters)
       .filter((item) => !filters.favoritesOnly || favoriteIds.has(item.id))
       .map((item) => this.toViewModel(item, favoriteIds, filters.language));
-    const starterItems = this.getStarterItems(filters, favoriteIds);
-    const learningPath = this.getLearningPath(filters, favoriteIds);
+    const lessons = this.getLessons(filters, favoriteIds);
+    const currentLessonModel = lessons.find((lesson) => lesson.id === currentLesson.id);
+    const results = shouldUsePracticeResults(filters) ? currentLessonModel?.items ?? [] : referenceResults;
 
     return {
       query: filters.query,
@@ -360,6 +361,8 @@ export class GuideService {
       stage: filters.stage,
       stages: this.getStages(filters.language),
       favoritesOnly: filters.favoritesOnly,
+      viewMode: filters.viewMode,
+      lesson: filters.lesson,
       categories: this.getCategories(),
       categoryOptions: this.getCategoryOptions(filters.language),
       totalCount: this.items.length,
@@ -368,8 +371,8 @@ export class GuideService {
       emptyQuery: filters.query.trim().length === 0,
       noResults: results.length === 0,
       items: results,
-      starterItems,
-      learningPath,
+      lessons,
+      currentLesson: currentLessonModel,
       guidanceText: getGuidanceText(filters, favoriteIds.size),
       ui: getUiText(filters.language),
       vscodeVim: this.getVscodeVimSnapshot(filters.language)
@@ -418,43 +421,48 @@ export class GuideService {
     };
   }
 
-  private getStarterItems(filters: GuideFilters, favoriteIds: ReadonlySet<string>): readonly GuideItemViewModel[] {
-    if (
-      filters.query.trim().length > 0 ||
-      filters.category !== ALL_CATEGORY ||
-      filters.stage !== ALL_STAGE ||
-      filters.favoritesOnly
-    ) {
-      return [];
-    }
-
-    return STARTER_ITEM_IDS.map((id) => this.itemMap.get(id))
-      .filter((item): item is GuideItem => item !== undefined)
-      .map((item) => this.toViewModel(item, favoriteIds, filters.language));
-  }
-
-  private getLearningPath(filters: GuideFilters, favoriteIds: ReadonlySet<string>): readonly GuideLearningPathStep[] {
-    if (filters.query.trim().length > 0 || filters.category !== ALL_CATEGORY || filters.favoritesOnly) {
-      return [];
-    }
-
-    return guideItemStages.map((stage) => {
-      const text = getLearningPathText(stage, filters.language);
+  private getLessons(filters: GuideFilters, favoriteIds: ReadonlySet<string>): readonly GuideLessonViewModel[] {
+    return guideLessons.map((lesson) => {
+      const text = getGuideLessonText(lesson, filters.language);
+      const active = lesson.id === filters.lesson;
       return {
-        stage,
-        label: getStageLabel(stage, filters.language),
+        id: lesson.id,
+        stage: lesson.stage,
+        stageLabel: getStageLabel(lesson.stage, filters.language),
         title: text.title,
         description: text.description,
+        practicePrompt: text.practicePrompt,
         readinessHint: text.readinessHint,
-        focusActionLabel: text.focusActionLabel,
-        itemCount: this.items.filter((item) => item.stage === stage).length,
-        active: filters.stage === stage || (filters.stage === ALL_STAGE && stage === "beginner"),
-        focusItems: LEARNING_PATH_ITEM_IDS[stage]
+        itemCount: lesson.itemIds.length,
+        active,
+        initiallyOpen: active,
+        items: lesson.itemIds
           .map((id) => this.itemMap.get(id))
           .filter((item): item is GuideItem => item !== undefined)
           .map((item) => this.toViewModel(item, favoriteIds, filters.language))
       };
     });
+  }
+
+  private resolveCurrentLesson(lessonId: string, stage: GuideStageFilter): GuideLesson {
+    const requestedLesson = guideLessons.find((lesson) => lesson.id === lessonId);
+    if (requestedLesson !== undefined && (stage === ALL_STAGE || requestedLesson.stage === stage)) {
+      return requestedLesson;
+    }
+
+    if (stage !== ALL_STAGE) {
+      const firstStageLesson = guideLessons.find((lesson) => lesson.stage === stage);
+      if (firstStageLesson !== undefined) {
+        return firstStageLesson;
+      }
+    }
+
+    const defaultLesson = guideLessons.find((lesson) => lesson.id === DEFAULT_GUIDE_LESSON_ID) ?? guideLessons[0];
+    if (defaultLesson === undefined) {
+      throw new Error("Vim Guide has no curriculum lessons configured.");
+    }
+
+    return defaultLesson;
   }
 }
 
@@ -464,12 +472,27 @@ export function normalizeGuideFilters(input: GuideFilterInput = {}, fallbackLang
     category: typeof input.category === "string" && input.category.trim().length > 0 ? input.category : ALL_CATEGORY,
     stage: isGuideStageFilter(input.stage) ? input.stage : ALL_STAGE,
     favoritesOnly: input.favoritesOnly === true,
-    language: isGuideLanguage(input.language) ? input.language : fallbackLanguage
+    language: isGuideLanguage(input.language) ? input.language : fallbackLanguage,
+    viewMode: isGuideViewMode(input.viewMode) ? input.viewMode : "practice",
+    lesson: typeof input.lesson === "string" && input.lesson.trim().length > 0 ? input.lesson : DEFAULT_GUIDE_LESSON_ID
   };
 }
 
 export function isGuideStageFilter(value: unknown): value is GuideStageFilter {
   return value === ALL_STAGE || guideItemStages.some((stage) => stage === value);
+}
+
+export function isGuideViewMode(value: unknown): value is GuideViewMode {
+  return value === "practice" || value === "all";
+}
+
+function shouldUsePracticeResults(filters: GuideFilters): boolean {
+  return (
+    filters.viewMode === "practice" &&
+    filters.query.trim().length === 0 &&
+    filters.category === ALL_CATEGORY &&
+    !filters.favoritesOnly
+  );
 }
 
 export function parseVscodeVimConfig(
@@ -699,6 +722,14 @@ function getGuidanceText(filters: GuideFilters, favoriteCount: number): string {
       return "연습 큐: 저장해 둔 Vim 명령과 생산성 팁입니다.";
     }
 
+    if (filters.viewMode === "all") {
+      return "전체 보기: 모든 명령을 reference처럼 검색하고 필터링합니다. 다시 연습 모드로 돌아가면 현재 레슨만 봅니다.";
+    }
+
+    if (filters.query.trim().length === 0 && filters.category === ALL_CATEGORY) {
+      return "연습 모드: 지금 선택한 레슨 항목만 반복합니다. 이미 익숙하면 전체 명령 보기를 켜세요.";
+    }
+
     if (filters.stage === "beginner") {
       return "입문 경로: 모드, 이동, 기본 편집부터 익힙니다.";
     }
@@ -709,10 +740,6 @@ function getGuidanceText(filters: GuideFilters, favoriteCount: number): string {
 
     if (filters.stage === "advanced") {
       return "고급 경로: 매크로, 창 이동, VSCodeVim remap을 익힙니다.";
-    }
-
-    if (filters.query.trim().length === 0 && filters.category === ALL_CATEGORY) {
-      return "기본기부터 시작한 뒤 실무 생산성, 고급 단계로 넘어가세요.";
     }
 
     return "";
@@ -726,6 +753,14 @@ function getGuidanceText(filters: GuideFilters, favoriteCount: number): string {
     return "Practice queue: your saved commands and tips.";
   }
 
+  if (filters.viewMode === "all") {
+    return "All commands: search and filter the full reference. Turn it off to return to the current lesson.";
+  }
+
+  if (filters.query.trim().length === 0 && filters.category === ALL_CATEGORY) {
+    return "Practice mode: repeat only the current lesson items. Turn on all commands when you already know the basics.";
+  }
+
   if (filters.stage === "beginner") {
     return "Beginner path: modes, movement, and basic edits.";
   }
@@ -736,10 +771,6 @@ function getGuidanceText(filters: GuideFilters, favoriteCount: number): string {
 
   if (filters.stage === "advanced") {
     return "Advanced path: macros, windows, and VSCodeVim remaps.";
-  }
-
-  if (filters.query.trim().length === 0 && filters.category === ALL_CATEGORY) {
-    return "Start with the basics, then move to Productive and Advanced.";
   }
 
   return "";
@@ -756,8 +787,18 @@ function getUiText(language: GuideLanguage): GuideUiText {
       categoryAriaLabel: "카테고리",
       favorites: "즐겨찾기",
       startHere: "여기서 시작",
-      learningPathTitle: "학습 경로",
-      learningPathIntro: "처음부터 모든 Vim 명령을 외우지 말고, 현재 단계의 작은 묶음만 반복하세요.",
+      curriculumTitle: "오늘의 Vim 연습",
+      curriculumIntro: "전체 명령을 먼저 외우지 말고, 현재 레슨의 작은 묶음을 반복하세요.",
+      currentLesson: "현재 레슨",
+      practicePrompt: "연습 방법",
+      readiness: "다음으로 넘어갈 기준",
+      lessonItemsLabel: "이 레슨에서 볼 항목",
+      practiceThisLesson: "이 레슨 연습",
+      practicingNow: "연습 중",
+      showAllCommands: "전체 명령 보기",
+      practiceModeLabel: "연습 모드",
+      referenceModeLabel: "전체 reference",
+      resultsTitle: "표시 중인 항목",
       focusItemsLabel: "먼저 익힐 것",
       currentLevel: "현재 추천",
       refresh: "새로고침",
@@ -791,8 +832,18 @@ function getUiText(language: GuideLanguage): GuideUiText {
     categoryAriaLabel: "Category",
     favorites: "Favorites",
     startHere: "Start here",
-    learningPathTitle: "Learning path",
-    learningPathIntro: "Do not memorize every Vim command at once. Practice the small set for your current level first.",
+    curriculumTitle: "Today's Vim practice",
+    curriculumIntro: "Do not memorize the full reference first. Repeat the small set in the current lesson.",
+    currentLesson: "Current lesson",
+    practicePrompt: "Practice",
+    readiness: "Ready for next",
+    lessonItemsLabel: "Lesson items",
+    practiceThisLesson: "Practice this lesson",
+    practicingNow: "Practicing",
+    showAllCommands: "Show all commands",
+    practiceModeLabel: "Practice mode",
+    referenceModeLabel: "Full reference",
+    resultsTitle: "Visible items",
     focusItemsLabel: "Practice first",
     currentLevel: "Recommended now",
     refresh: "Refresh",
@@ -815,61 +866,6 @@ function getUiText(language: GuideLanguage): GuideUiText {
     countAriaSuffix: " guide items",
     searchStarterPrefix: "Search "
   };
-}
-
-function getLearningPathText(
-  stage: GuideItemStage,
-  language: GuideLanguage
-): Pick<GuideLearningPathStep, "title" | "description" | "readinessHint" | "focusActionLabel"> {
-  if (language === "ko") {
-    switch (stage) {
-      case "beginner":
-        return {
-          title: "1단계: 지금은 이것만 반복",
-          description: "모드 전환, 기본 이동, 줄 삭제/복사, 빠른 파일 열기만 몸에 익힙니다.",
-          readinessHint: "생각하지 않고 i, w, dd, yy, Cmd+P를 쓸 수 있으면 다음 단계로 넘어가세요.",
-          focusActionLabel: "입문만 보기"
-        };
-      case "productive":
-        return {
-          title: "2단계: 작업 속도 올리기",
-          description: "검색, 다음 결과 이동, 단어 단위 조작, register, 전체 검색을 추가합니다.",
-          readinessHint: "검색과 text object를 실제 코드 수정에 자연스럽게 쓰기 시작하면 고급으로 넘어가세요.",
-          focusActionLabel: "실무 생산성만 보기"
-        };
-      case "advanced":
-        return {
-          title: "3단계: 반복 작업 자동화",
-          description: "매크로, 창 이동, leader/remap으로 반복 작업을 줄이는 습관을 만듭니다.",
-          readinessHint: "반복 수정이나 프로젝트별 명령을 직접 묶고 싶을 때 이 단계가 효과적입니다.",
-          focusActionLabel: "고급만 보기"
-        };
-    }
-  }
-
-  switch (stage) {
-    case "beginner":
-      return {
-        title: "Step 1: Use only these for now",
-        description: "Build muscle memory for modes, basic movement, line delete/yank, and quick file open.",
-        readinessHint: "Move on when i, w, dd, yy, and Cmd+P feel automatic.",
-        focusActionLabel: "Show Beginner only"
-      };
-    case "productive":
-      return {
-        title: "Step 2: Add working-speed habits",
-        description: "Add search, next match, word text objects, registers, and workspace search.",
-        readinessHint: "Move on when search and text objects show up naturally in real edits.",
-        focusActionLabel: "Show Productive only"
-      };
-    case "advanced":
-      return {
-        title: "Step 3: Automate repeated work",
-        description: "Use macros, window movement, leader keys, and remaps to reduce repeated actions.",
-        readinessHint: "Use this when you want to bundle repeated edits or project-specific commands.",
-        focusActionLabel: "Show Advanced only"
-      };
-  }
 }
 
 function settingLabel(name: "leader" | "normal" | "visual" | "insert" | "clipboard", language: GuideLanguage): string {

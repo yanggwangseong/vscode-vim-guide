@@ -1,7 +1,8 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
+import { DEFAULT_GUIDE_LESSON_ID, guideLessons } from "../../data/guideCurriculum";
 import { GuideItem, guideItemStageOverrides, guideItemStages, guideItems } from "../../data/guideData";
-import { koreanGuideItemText } from "../../data/localization";
+import { koreanGuideItemText, koreanGuideLessonText } from "../../data/localization";
 import {
   ALLOWED_VSCODE_COMMANDS,
   ALL_CATEGORY,
@@ -130,9 +131,9 @@ suite("guide data", () => {
     const vimLikeCount = guideItems.filter((item) => item.source !== "vscode").length;
     const vscodeCommandCount = guideItems.filter((item) => item.type === "vscode-command").length;
 
-    assert.strictEqual(vimLikeCount, 48);
-    assert.strictEqual(vscodeCommandCount, 12);
-    assert.strictEqual(guideItems.length, 60);
+    assert.strictEqual(vimLikeCount, 53);
+    assert.strictEqual(vscodeCommandCount, 13);
+    assert.strictEqual(guideItems.length, 66);
   });
 
   test("has stable ids and required fields", () => {
@@ -172,6 +173,29 @@ suite("guide data", () => {
 
     for (const id of Object.keys(koreanGuideItemText)) {
       assert.ok(ids.has(id), `Korean localization references an unknown item: ${id}`);
+    }
+  });
+
+  test("keeps curriculum lessons pointed at stable guide item ids", () => {
+    const ids = new Set(guideItems.map((item) => item.id));
+    const lessonIds = new Set<string>();
+
+    assert.ok(guideLessons.some((lesson) => lesson.id === DEFAULT_GUIDE_LESSON_ID));
+    for (const lesson of guideLessons) {
+      assert.ok(!lessonIds.has(lesson.id), `duplicate lesson id: ${lesson.id}`);
+      assert.ok(lesson.title.length > 0, `lesson title is required for ${lesson.id}`);
+      assert.ok(lesson.description.length > 0, `lesson description is required for ${lesson.id}`);
+      assert.ok(lesson.practicePrompt.length > 0, `lesson practice prompt is required for ${lesson.id}`);
+      assert.ok(lesson.readinessHint.length > 0, `lesson readiness hint is required for ${lesson.id}`);
+      assert.ok(lesson.itemIds.length >= 7, `lesson should include enough practice items: ${lesson.id}`);
+      assert.ok(koreanGuideLessonText[lesson.id], `missing Korean lesson localization for ${lesson.id}`);
+      for (const itemId of lesson.itemIds) {
+        assert.ok(ids.has(itemId), `lesson ${lesson.id} references an unknown item: ${itemId}`);
+      }
+      if (lesson.nextLessonId !== undefined) {
+        assert.ok(guideLessons.some((candidate) => candidate.id === lesson.nextLessonId), `unknown next lesson: ${lesson.nextLessonId}`);
+      }
+      lessonIds.add(lesson.id);
     }
   });
 
@@ -288,7 +312,8 @@ suite("GuideService", () => {
 
     assert.strictEqual(model.language, "ko");
     assert.strictEqual(model.languages.find((language) => language.id === "ko")?.label, "한국어");
-    assert.ok(defaultModel.guidanceText.includes("기본기"));
+    assert.ok(defaultModel.guidanceText.includes("연습 모드"));
+    assert.strictEqual(defaultModel.currentLesson?.title, "생존 루프: 이동, 입력, 저장");
     assert.ok(model.items.some((item) => item.id === "vim-edit-delete-line"));
     const deleteLine = model.items.find((item) => item.id === "vim-edit-delete-line");
     assert.strictEqual(deleteLine?.displayTitle, "현재 줄 삭제");
@@ -297,23 +322,38 @@ suite("GuideService", () => {
     assert.strictEqual(deleteLine?.actionLabel, "에디터에서 직접 입력");
   });
 
-  test("builds a level-based learning path with focus items", () => {
+  test("builds a lesson-based curriculum and defaults to current lesson practice", () => {
     const service = createService();
     const defaultModel = service.createViewModel({ language: "ko" });
     const productiveModel = service.createViewModel({ stage: "productive", language: "ko" });
     const searchModel = service.createViewModel({ query: "삭제", language: "ko" });
+    const allModel = service.createViewModel({ viewMode: "all", language: "ko" });
 
     assert.deepStrictEqual(
-      defaultModel.learningPath.map((step) => step.stage),
-      ["beginner", "productive", "advanced"]
+      defaultModel.lessons.map((lesson) => lesson.id),
+      guideLessons.map((lesson) => lesson.id)
     );
-    assert.strictEqual(defaultModel.learningPath[0]?.active, true);
-    assert.ok(defaultModel.learningPath.every((step) => step.focusItems.length === 5));
-    assert.ok(defaultModel.learningPath[0]?.title.includes("1단계"));
-    assert.ok(defaultModel.learningPath[0]?.focusItems.some((item) => item.id === "vim-edit-delete-line"));
+    assert.strictEqual(defaultModel.viewMode, "practice");
+    assert.strictEqual(defaultModel.lesson, DEFAULT_GUIDE_LESSON_ID);
+    assert.strictEqual(defaultModel.currentLesson?.id, DEFAULT_GUIDE_LESSON_ID);
+    assert.strictEqual(defaultModel.currentLesson?.active, true);
+    assert.strictEqual(defaultModel.currentLesson?.initiallyOpen, true);
+    assert.deepStrictEqual(
+      defaultModel.items.map((item) => item.id),
+      defaultModel.currentLesson?.items.map((item) => item.id)
+    );
+    assert.ok(defaultModel.items.some((item) => item.id === "vim-mode-normal"));
+    assert.ok(defaultModel.items.some((item) => item.id === "vim-motion-left-right"));
+    assert.ok(defaultModel.items.some((item) => item.id === "vscode-command-save-file"));
 
-    assert.strictEqual(productiveModel.learningPath.find((step) => step.stage === "productive")?.active, true);
-    assert.strictEqual(searchModel.learningPath.length, 0);
+    assert.strictEqual(productiveModel.currentLesson?.stage, "productive");
+    assert.strictEqual(productiveModel.currentLesson?.id, "lesson-search-workflow");
+    assert.ok(productiveModel.items.every((item) => productiveModel.currentLesson?.items.some((lessonItem) => lessonItem.id === item.id)));
+
+    assert.ok(searchModel.lessons.length > 0);
+    assert.ok(searchModel.items.some((item) => item.id === "vim-edit-delete-line"));
+    assert.strictEqual(allModel.viewMode, "all");
+    assert.strictEqual(allModel.resultCount, guideItems.length);
   });
 
   test("persists display language through state", async () => {
@@ -370,7 +410,10 @@ suite("GuideService", () => {
     assert.strictEqual(model.stage, ALL_STAGE);
     assert.strictEqual(model.favoritesOnly, false);
     assert.strictEqual(model.language, "en");
-    assert.strictEqual(model.resultCount, 60);
+    assert.strictEqual(model.viewMode, "practice");
+    assert.strictEqual(model.lesson, DEFAULT_GUIDE_LESSON_ID);
+    assert.strictEqual(model.totalCount, 66);
+    assert.strictEqual(model.resultCount, model.currentLesson?.items.length);
   });
 
   test("persists favorites through state", async () => {
@@ -569,13 +612,16 @@ suite("GuideViewProvider", () => {
 
     assert.strictEqual(fake.webview.options.enableScripts, true);
     assert.ok(fake.webview.html.includes("Content-Security-Policy"));
+    assert.ok(fake.webview.html.includes('id="curriculum"'));
     assert.ok(fake.webview.html.includes('id="search"'));
     assert.ok(fake.webview.html.includes('id="language"'));
     assert.ok(fake.webview.html.includes('id="stage"'));
     assert.ok(fake.webview.html.includes('aria-label="Search guide items"'));
     assert.ok(fake.webview.html.includes('id="favorites-only"'));
-    assert.ok(fake.webview.html.includes('id="starter"'));
-    assert.ok(fake.webview.html.includes('id="learning-path"'));
+    assert.ok(fake.webview.html.includes('showAll.id = "show-all"'));
+    assert.ok(fake.webview.html.includes("renderCurriculum"));
+    assert.ok(fake.webview.html.includes("renderLesson"));
+    assert.ok(fake.webview.html.includes(".lesson-card"));
     assert.ok(fake.webview.html.includes('id="vim-summary-status"'));
     assert.ok(fake.webview.html.includes('id="settings-list"'));
     assert.ok(fake.webview.html.includes('id="results"'));
@@ -586,8 +632,9 @@ suite("GuideViewProvider", () => {
     assert.ok(fake.webview.html.includes('"setting-value status-"'));
     assert.ok(fake.webview.html.includes("describeNoResults"));
     assert.ok(fake.webview.html.includes("model.ui.favorites"));
-    assert.ok(fake.webview.html.includes('"totalCount":60'));
+    assert.ok(fake.webview.html.includes('"totalCount":66'));
     assert.ok(fake.webview.html.includes('"label":"한국어"'));
+    assert.ok(fake.webview.html.indexOf('id="curriculum"') < fake.webview.html.indexOf('id="controls"'));
     assert.ok(fake.webview.html.indexOf('id="results"') < fake.webview.html.indexOf('class="settings"'));
   });
 
@@ -602,12 +649,14 @@ suite("GuideViewProvider", () => {
     await flushPromises();
 
     let model = latestViewModel(fake.webview);
-    assert.strictEqual(model.totalCount, 60);
-    assert.strictEqual(model.resultCount, 60);
-    assert.strictEqual(model.starterItems.length, 5);
-    assert.strictEqual(model.learningPath.length, 3);
-    assert.ok(model.learningPath[0]?.focusItems.some((item) => item.id === "vim-mode-insert-before"));
-    assert.ok(model.guidanceText.includes("Start with the basics"));
+    assert.strictEqual(model.totalCount, 66);
+    assert.strictEqual(model.viewMode, "practice");
+    assert.strictEqual(model.currentLesson?.id, DEFAULT_GUIDE_LESSON_ID);
+    assert.strictEqual(model.resultCount, model.currentLesson?.items.length);
+    assert.strictEqual(model.lessons.length, guideLessons.length);
+    assert.ok(model.items.some((item) => item.id === "vim-mode-normal"));
+    assert.ok(model.items.some((item) => item.id === "vscode-command-save-file"));
+    assert.ok(model.guidanceText.includes("Practice mode"));
 
     fake.webview.receive({ type: "filter", query: "delete line", category: ALL_CATEGORY, stage: "beginner", favoritesOnly: false });
     await flushPromises();
@@ -615,7 +664,7 @@ suite("GuideViewProvider", () => {
     assert.strictEqual(model.query, "delete line");
     assert.strictEqual(model.stage, "beginner");
     assert.strictEqual(model.favoritesOnly, false);
-    assert.strictEqual(model.learningPath.length, 0);
+    assert.strictEqual(model.lessons.length, guideLessons.length);
     assert.ok(model.items.some((item) => item.id === "vim-edit-delete-line"));
 
     fake.webview.receive({ type: "filter", query: "현재 줄 삭제", category: ALL_CATEGORY, stage: "beginner", favoritesOnly: false, language: "ko" });
@@ -638,6 +687,37 @@ suite("GuideViewProvider", () => {
     model = latestViewModel(fake.webview);
     assert.strictEqual(model.favoritesOnly, true);
     assert.deepStrictEqual(model.items.map((item) => item.id), ["vim-edit-delete-line"]);
+
+    fake.webview.receive({
+      type: "filter",
+      query: "",
+      category: ALL_CATEGORY,
+      stage: ALL_STAGE,
+      favoritesOnly: false,
+      language: "en",
+      viewMode: "all",
+      lesson: DEFAULT_GUIDE_LESSON_ID
+    });
+    await flushPromises();
+    model = latestViewModel(fake.webview);
+    assert.strictEqual(model.viewMode, "all");
+    assert.strictEqual(model.resultCount, guideItems.length);
+
+    fake.webview.receive({
+      type: "filter",
+      query: "",
+      category: ALL_CATEGORY,
+      stage: "beginner",
+      favoritesOnly: false,
+      language: "en",
+      viewMode: "practice",
+      lesson: "lesson-line-navigation"
+    });
+    await flushPromises();
+    model = latestViewModel(fake.webview);
+    assert.strictEqual(model.viewMode, "practice");
+    assert.strictEqual(model.currentLesson?.id, "lesson-line-navigation");
+    assert.ok(model.items.some((item) => item.id === "vim-motion-line-column-start"));
   });
 
   test("copy messages write item keys and ignore invalid ids", async () => {

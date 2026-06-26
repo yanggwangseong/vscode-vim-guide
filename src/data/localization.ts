@@ -1,4 +1,5 @@
 import { GuideItem, GuideItemStage, GuideItemType } from "./guideData";
+import { GuideLesson } from "./guideCurriculum";
 
 export const guideLanguages = ["en", "ko"] as const;
 
@@ -15,12 +16,27 @@ export interface GuideItemLocalizedText {
   readonly tags?: readonly string[];
 }
 
+export interface GuideLessonLocalizedText {
+  readonly title: string;
+  readonly description: string;
+  readonly practicePrompt: string;
+  readonly readinessHint: string;
+}
+
 export const guideLanguageOptions: readonly GuideLanguageOption[] = [
   { id: "en", label: "English" },
   { id: "ko", label: "한국어" }
 ];
 
 export const koreanGuideItemText: Readonly<Record<string, GuideItemLocalizedText>> = {
+  "vim-motion-left-right": {
+    title: "좌우로 한 칸 이동",
+    description: "Normal mode에서 커서를 왼쪽 또는 오른쪽으로 한 글자씩 움직입니다."
+  },
+  "vim-motion-up-down": {
+    title: "위아래로 한 줄 이동",
+    description: "Normal mode에서 커서를 아래 줄 또는 위 줄로 움직입니다."
+  },
   "vim-motion-word-forward": {
     title: "다음 단어로 이동",
     description: "커서를 다음 단어의 시작 위치로 옮깁니다. d나 c 같은 operator와 조합하면 단어 단위 편집이 빨라집니다."
@@ -36,6 +52,10 @@ export const koreanGuideItemText: Readonly<Record<string, GuideItemLocalizedText
   "vim-motion-line-start": {
     title: "줄의 첫 글자로 이동",
     description: "현재 줄에서 공백을 제외한 첫 문자 위치로 점프합니다."
+  },
+  "vim-motion-line-column-start": {
+    title: "줄의 맨 왼쪽으로 이동",
+    description: "들여쓰기까지 포함해 현재 줄의 0번째 열, 즉 가장 왼쪽 위치로 점프합니다."
   },
   "vim-motion-line-end": {
     title: "줄 끝으로 이동",
@@ -101,6 +121,10 @@ export const koreanGuideItemText: Readonly<Record<string, GuideItemLocalizedText
     title: "마지막 변경 반복",
     description: "방금 수행한 변경을 현재 위치에도 반복합니다. 같은 편집을 여러 곳에 적용할 때 유용합니다."
   },
+  "vim-mode-normal": {
+    title: "Normal mode로 돌아가기",
+    description: "Insert, Visual, command-line mode에서 빠져나와 다시 Normal mode로 돌아갑니다."
+  },
   "vim-mode-insert-before": {
     title: "커서 앞에서 입력 시작",
     description: "커서 앞 위치에서 Insert mode로 들어갑니다."
@@ -108,6 +132,10 @@ export const koreanGuideItemText: Readonly<Record<string, GuideItemLocalizedText
   "vim-mode-insert-after": {
     title: "커서 뒤에서 입력 시작",
     description: "커서 뒤 위치에서 Insert mode로 들어갑니다."
+  },
+  "vim-mode-append-line-end": {
+    title: "줄 끝에서 입력 시작",
+    description: "현재 줄 끝으로 이동한 뒤 Insert mode로 들어갑니다. 줄 끝에 내용을 덧붙일 때 자주 씁니다."
   },
   "vim-mode-open-below": {
     title: "아래 줄 열고 입력",
@@ -213,6 +241,10 @@ export const koreanGuideItemText: Readonly<Record<string, GuideItemLocalizedText
     title: "모드별 remap",
     description: "VSCodeVim은 normal, visual, insert 모드별로 다른 키 매핑을 지원합니다."
   },
+  "vscode-command-save-file": {
+    title: "현재 파일 저장",
+    description: "VS Code의 기본 저장 명령으로 현재 활성 에디터 파일을 저장합니다."
+  },
   "vscode-command-quick-open": {
     title: "파일 빠르게 열기",
     description: "VS Code Quick Open을 열어 파일 이름으로 빠르게 이동합니다."
@@ -263,6 +295,45 @@ export const koreanGuideItemText: Readonly<Record<string, GuideItemLocalizedText
   }
 };
 
+export const koreanGuideLessonText: Readonly<Record<string, GuideLessonLocalizedText>> = {
+  "lesson-survival-loop": {
+    title: "생존 루프: 이동, 입력, 저장",
+    description: "Vim이 아직 불안할 때 여기서 시작하세요. 이동하고, 입력하고, 저장하고, 닫는 데 필요한 키만 익힙니다.",
+    practicePrompt: "아무 파일이나 열고 Esc를 누른 뒤 h/j/k/l로 움직이고, i나 A로 입력한 다음 Cmd+S로 저장해 보세요.",
+    readinessHint: "Esc, h/j/k/l, i, A, Cmd+S, Cmd+W를 검색하지 않고 쓸 수 있으면 다음 레슨으로 넘어가세요."
+  },
+  "lesson-line-navigation": {
+    title: "줄과 파일 안에서 이동",
+    description: "코드를 읽을 때 계속 쓰는 이동을 추가합니다. 단어, 줄의 양 끝, 파일 처음/끝, 줄 번호 이동입니다.",
+    practicePrompt: "실제 소스 파일에서 w/b/e로 단어를 이동하고 0/^/$, gg/G, 줄 번호 이동을 차례대로 써 보세요.",
+    readinessHint: "마우스 없이 줄 끝이나 원하는 줄 번호에 도달할 수 있으면 다음 레슨으로 넘어가세요."
+  },
+  "lesson-basic-edits": {
+    title: "매일 쓰는 편집 루프",
+    description: "마우스 선택을 대부분 대체하는 편집을 익힙니다. 줄 열기, 삭제, 변경, 복사, 붙여넣기, 되돌리기입니다.",
+    practicePrompt: "yy 다음 p로 줄을 복제하고, dd로 삭제하고, cc로 다시 쓰고, u/Ctrl+r로 되돌리기와 다시 실행을 연습하세요.",
+    readinessHint: "줄 복사/삭제/붙여넣기와 되돌리기를 실제 작업에서 안전하게 쓸 수 있으면 다음 레슨으로 넘어가세요."
+  },
+  "lesson-search-workflow": {
+    title: "코드 빠르게 찾기",
+    description: "현재 파일은 Vim 검색으로, 프로젝트 전체는 VS Code 검색으로 빠르게 이동합니다.",
+    practicePrompt: "/로 파일 안을 검색하고 n/N으로 이동한 뒤, *로 커서 아래 단어를 찾고 전체 검색을 열어 보세요.",
+    readinessHint: "스크롤로 훑는 것보다 검색이 더 빠르게 느껴지면 다음 레슨으로 넘어가세요."
+  },
+  "lesson-structured-edits": {
+    title: "구조 단위 편집",
+    description: "text object, register, 반복, 작은 교체/줄 합치기를 추가해 실제 코드 수정 속도를 올립니다.",
+    practicePrompt: "operator와 iw/aw로 단어를 바꾸고, .으로 변경을 반복하고, 필요할 때만 clipboard register를 사용하세요.",
+    readinessHint: "text object가 마우스로 드래그하는 선택보다 자연스럽게 느껴지면 다음 레슨으로 넘어가세요."
+  },
+  "lesson-automation-workspace": {
+    title: "자동화와 작업 공간 흐름",
+    description: "기본 편집 루프가 익숙해진 뒤 매크로, 창 이동, leader, remap으로 반복 작업을 줄입니다.",
+    practicePrompt: "반복 가능한 수정 하나를 매크로로 기록해 다시 실행하고, split 사이를 이동하며 어떤 remap이 필요한지 점검하세요.",
+    readinessHint: "기본 이동이 아니라 반복 수정이나 프로젝트 명령이 병목일 때 이 단계가 효과적입니다."
+  }
+};
+
 const koreanCategoryLabels: Readonly<Record<string, string>> = {
   All: "전체",
   Modes: "모드 전환",
@@ -291,6 +362,26 @@ export function getGuideItemText(item: GuideItem, language: GuideLanguage): Guid
     title: item.title,
     description: item.description,
     tags: item.tags
+  };
+}
+
+export function getGuideLessonText(lesson: GuideLesson, language: GuideLanguage): GuideLessonLocalizedText {
+  if (language === "ko") {
+    return (
+      koreanGuideLessonText[lesson.id] ?? {
+        title: lesson.title,
+        description: lesson.description,
+        practicePrompt: lesson.practicePrompt,
+        readinessHint: lesson.readinessHint
+      }
+    );
+  }
+
+  return {
+    title: lesson.title,
+    description: lesson.description,
+    practicePrompt: lesson.practicePrompt,
+    readinessHint: lesson.readinessHint
   };
 }
 

@@ -50,7 +50,6 @@ export const guideItemStageOverrides: Readonly<Record<string, GuideItemStage>> =
   "vscodevim-leader-tip": "advanced",
   "vscodevim-clipboard-tip": "productive",
   "vscodevim-keybindings-tip": "advanced",
-  "vscode-command-goto-line": "productive",
   "vscode-command-recent-editor": "productive",
   "vscode-command-toggle-sidebar": "productive",
   "vscode-command-find-files": "productive",
@@ -58,11 +57,30 @@ export const guideItemStageOverrides: Readonly<Record<string, GuideItemStage>> =
   "vscode-command-toggle-terminal": "productive",
   "vscode-command-toggle-panel": "productive",
   "vscode-command-navigate-back": "productive",
-  "vscode-command-close-editor": "productive",
   "vscode-command-next-editor": "productive"
 };
 
 const guideItemSeeds: readonly GuideItemSeed[] = [
+  {
+    id: "vim-motion-left-right",
+    title: "Move left or right",
+    keys: "h / l",
+    category: "Motions",
+    description: "Move one character left or right in Normal mode.",
+    source: "vim",
+    type: "command",
+    tags: ["motion", "character", "normal"]
+  },
+  {
+    id: "vim-motion-up-down",
+    title: "Move up or down",
+    keys: "j / k",
+    category: "Motions",
+    description: "Move one line down or up in Normal mode.",
+    source: "vim",
+    type: "command",
+    tags: ["motion", "line", "normal"]
+  },
   {
     id: "vim-motion-word-forward",
     title: "Move to next word",
@@ -99,6 +117,16 @@ const guideItemSeeds: readonly GuideItemSeed[] = [
     keys: "^",
     category: "Motions",
     description: "Jump to the first non-blank character on the current line.",
+    source: "vim",
+    type: "command",
+    tags: ["motion", "line", "normal"]
+  },
+  {
+    id: "vim-motion-line-column-start",
+    title: "Move to first column",
+    keys: "0",
+    category: "Motions",
+    description: "Jump to column zero at the start of the current line, including indentation.",
     source: "vim",
     type: "command",
     tags: ["motion", "line", "normal"]
@@ -264,6 +292,16 @@ const guideItemSeeds: readonly GuideItemSeed[] = [
     tags: ["repeat", "productivity", "normal"]
   },
   {
+    id: "vim-mode-normal",
+    title: "Return to Normal mode",
+    keys: "Esc",
+    category: "Modes",
+    description: "Leave Insert, Visual, or command-line mode and return to Normal mode.",
+    source: "vim",
+    type: "command",
+    tags: ["normal", "mode", "escape"]
+  },
+  {
     id: "vim-mode-insert-before",
     title: "Insert before cursor",
     keys: "i",
@@ -282,6 +320,16 @@ const guideItemSeeds: readonly GuideItemSeed[] = [
     source: "vim",
     type: "command",
     tags: ["insert", "mode", "normal"]
+  },
+  {
+    id: "vim-mode-append-line-end",
+    title: "Append at line end",
+    keys: "A",
+    category: "Modes",
+    description: "Move to the end of the current line and enter Insert mode.",
+    source: "vim",
+    type: "command",
+    tags: ["insert", "line", "normal"]
   },
   {
     id: "vim-mode-open-below",
@@ -542,6 +590,17 @@ const guideItemSeeds: readonly GuideItemSeed[] = [
     source: "vscodevim",
     type: "tip",
     tags: ["settings", "remap", "keybindings"]
+  },
+  {
+    id: "vscode-command-save-file",
+    title: "Save current file",
+    keys: "Cmd+S",
+    category: "VS Code Commands",
+    description: "Save the active editor using the standard VS Code save command.",
+    source: "vscode",
+    type: "vscode-command",
+    tags: ["save", "file", "editor"],
+    command: "workbench.action.files.save"
   },
   {
     id: "vscode-command-quick-open",

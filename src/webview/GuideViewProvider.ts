@@ -11,6 +11,8 @@ type WebviewMessage =
       readonly stage?: unknown;
       readonly favoritesOnly?: unknown;
       readonly language?: unknown;
+      readonly viewMode?: unknown;
+      readonly lesson?: unknown;
     }
   | { readonly type: "toggleFavorite"; readonly id?: unknown }
   | { readonly type: "copy"; readonly id?: unknown }
@@ -266,8 +268,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
 
         .notice,
         .guidance,
-        .starter,
-        .learning-path,
+        .curriculum,
         .vim-summary,
         .settings {
           border: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-panel-border));
@@ -284,104 +285,115 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
           color: var(--vscode-descriptionForeground);
         }
 
-        .starter {
-          display: grid;
-          gap: 8px;
-        }
-
-        .learning-path {
+        .curriculum {
           display: grid;
           gap: 9px;
         }
 
-        .learning-path-head {
+        .curriculum-head {
           display: grid;
-          gap: 2px;
+          gap: 4px;
         }
 
-        .learning-path-title,
-        .starter-title {
+        .curriculum-title,
+        .results-title {
           font-weight: 650;
         }
 
-        .learning-path-intro,
-        .path-hint,
+        .curriculum-intro,
+        .lesson-meta,
+        .lesson-note,
+        .lesson-label,
         .path-count {
           color: var(--vscode-descriptionForeground);
           font-size: 12px;
         }
 
-        .path-list {
+        .mode-toggle {
+          display: flex;
+          align-items: center;
+          gap: 7px;
+          min-height: 28px;
+        }
+
+        .lesson-list {
           display: grid;
           gap: 8px;
         }
 
-        .path-card {
+        .lesson-card {
           display: grid;
-          gap: 7px;
           border: 1px solid var(--vscode-panel-border);
           border-radius: var(--radius);
-          padding: 9px;
           background: var(--vscode-sideBar-background);
         }
 
-        .path-card.active {
+        .lesson-card.active {
           border-color: var(--vscode-focusBorder);
         }
 
-        .path-topline {
+        .lesson-card summary {
+          display: grid;
+          gap: 8px;
+          padding: 9px;
+          cursor: pointer;
+          list-style: none;
+        }
+
+        .lesson-card summary::-webkit-details-marker {
+          display: none;
+        }
+
+        .lesson-summary-top {
           display: flex;
           align-items: baseline;
           justify-content: space-between;
           gap: 8px;
         }
 
-        .path-title {
+        .lesson-title {
           font-weight: 650;
           overflow-wrap: anywhere;
         }
 
-        .path-description {
+        .lesson-description,
+        .lesson-practice,
+        .lesson-readiness {
           margin: 0;
           overflow-wrap: anywhere;
         }
 
-        .path-items {
-          display: flex;
-          flex-wrap: wrap;
+        .lesson-body {
+          display: grid;
+          gap: 8px;
+          padding: 0 9px 9px;
+        }
+
+        .lesson-items {
+          display: grid;
           gap: 5px;
         }
 
-        .path-chip {
-          max-width: 100%;
-          border: 1px solid var(--vscode-badge-background, var(--vscode-panel-border));
-          border-radius: 999px;
-          padding: 1px 6px;
-          color: var(--vscode-descriptionForeground);
-          background: transparent;
+        .lesson-item {
+          display: grid;
+          grid-template-columns: minmax(44px, auto) minmax(0, 1fr);
+          gap: 6px;
+          align-items: baseline;
+        }
+
+        .lesson-item code {
+          color: var(--vscode-editor-foreground);
+          font-family: var(--vscode-editor-font-family);
           overflow-wrap: anywhere;
         }
 
-        .path-action {
+        .lesson-item-title {
+          min-width: 0;
+          overflow-wrap: anywhere;
+        }
+
+        .lesson-action {
           justify-self: start;
-        }
-
-        .starter-list {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 6px;
-        }
-
-        .starter-chip {
-          display: inline-flex;
-          align-items: center;
-          gap: 5px;
-          max-width: 100%;
-        }
-
-        .starter-chip code {
-          color: var(--vscode-editor-foreground);
-          font-family: var(--vscode-editor-font-family);
         }
 
         .vim-summary {
@@ -558,6 +570,9 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       <span class="count" id="count" role="status" aria-live="polite"></span>
     </div>
 
+        <section class="curriculum" id="curriculum" aria-label="Today's Vim practice"></section>
+        <div class="guidance" id="guidance" role="status" aria-live="polite" hidden></div>
+
         <section class="controls" id="controls" aria-label="Filters">
           <input id="search" type="search" placeholder="Search title, keys, category, tags" autocomplete="off" aria-label="Search guide items">
           <div class="filter-row">
@@ -579,9 +594,6 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
           <button class="link" id="refresh-summary" type="button">Refresh</button>
         </section>
 
-        <section class="learning-path" id="learning-path" aria-label="Learning path" hidden></section>
-        <div class="guidance" id="guidance" role="status" aria-live="polite" hidden></div>
-        <section class="starter" id="starter" aria-label="Start here" hidden></section>
         <div class="notice" id="notice" role="status" aria-live="polite" hidden></div>
         <section class="results" id="results"></section>
 
@@ -608,9 +620,8 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
         const favoritesOnly = document.getElementById("favorites-only");
         const favoriteLabel = document.getElementById("favorite-label");
         const count = document.getElementById("count");
-        const learningPath = document.getElementById("learning-path");
+        const curriculum = document.getElementById("curriculum");
         const guidance = document.getElementById("guidance");
-        const starter = document.getElementById("starter");
         const notice = document.getElementById("notice");
         const results = document.getElementById("results");
         const settingsList = document.getElementById("settings-list");
@@ -639,14 +650,16 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
         refresh.addEventListener("click", () => vscode.postMessage({ type: "refreshConfig" }));
         refreshSummary.addEventListener("click", () => vscode.postMessage({ type: "refreshConfig" }));
 
-        function postFilter() {
+        function postFilter(overrides = {}) {
           vscode.postMessage({
             type: "filter",
-            query: searchInput.value,
-            category: categorySelect.value,
-            stage: stageSelect.value,
-            favoritesOnly: favoritesOnly.checked,
-            language: languageSelect.value
+            query: Object.prototype.hasOwnProperty.call(overrides, "query") ? overrides.query : searchInput.value,
+            category: Object.prototype.hasOwnProperty.call(overrides, "category") ? overrides.category : categorySelect.value,
+            stage: Object.prototype.hasOwnProperty.call(overrides, "stage") ? overrides.stage : stageSelect.value,
+            favoritesOnly: Object.prototype.hasOwnProperty.call(overrides, "favoritesOnly") ? overrides.favoritesOnly : favoritesOnly.checked,
+            language: Object.prototype.hasOwnProperty.call(overrides, "language") ? overrides.language : languageSelect.value,
+            viewMode: Object.prototype.hasOwnProperty.call(overrides, "viewMode") ? overrides.viewMode : currentModel.viewMode,
+            lesson: Object.prototype.hasOwnProperty.call(overrides, "lesson") ? overrides.lesson : currentModel.lesson
           });
         }
 
@@ -668,9 +681,8 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
           renderStages(model);
           renderCategories(model);
           renderSettings(model.vscodeVim);
-          renderLearningPath(model);
+          renderCurriculum(model);
           renderGuidance(model);
-          renderStarter(model);
           renderNotice();
           renderItems(model);
           count.textContent = model.resultCount + "/" + model.totalCount;
@@ -749,82 +761,132 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
           }
         }
 
-        function renderLearningPath(model) {
-          learningPath.replaceChildren();
-
-          if (model.learningPath.length === 0) {
-            learningPath.hidden = true;
-            return;
-          }
-
-          learningPath.hidden = false;
-          learningPath.setAttribute("aria-label", model.ui.learningPathTitle);
+        function renderCurriculum(model) {
+          curriculum.replaceChildren();
+          curriculum.setAttribute("aria-label", model.ui.curriculumTitle);
 
           const head = document.createElement("div");
-          head.className = "learning-path-head";
+          head.className = "curriculum-head";
           const title = document.createElement("div");
-          title.className = "learning-path-title";
-          title.textContent = model.ui.learningPathTitle;
+          title.className = "curriculum-title";
+          title.textContent = model.ui.curriculumTitle;
           const intro = document.createElement("div");
-          intro.className = "learning-path-intro";
-          intro.textContent = model.ui.learningPathIntro;
+          intro.className = "curriculum-intro";
+          intro.textContent = model.ui.curriculumIntro;
           head.append(title, intro);
 
-          const list = document.createElement("div");
-          list.className = "path-list";
-
-          for (const step of model.learningPath) {
-            const card = document.createElement("article");
-            card.className = step.active ? "path-card active" : "path-card";
-
-            const topLine = document.createElement("div");
-            topLine.className = "path-topline";
-            const stepTitle = document.createElement("div");
-            stepTitle.className = "path-title";
-            stepTitle.textContent = step.title;
-            const count = document.createElement("div");
-            count.className = "path-count";
-            count.textContent = step.label + " · " + step.itemCount;
-            topLine.append(stepTitle, count);
-
-            const description = document.createElement("p");
-            description.className = "path-description";
-            description.textContent = step.description;
-
-            const itemLabel = document.createElement("div");
-            itemLabel.className = "path-count";
-            itemLabel.textContent = step.active ? model.ui.currentLevel + " · " + model.ui.focusItemsLabel : model.ui.focusItemsLabel;
-
-            const itemList = document.createElement("div");
-            itemList.className = "path-items";
-            for (const item of step.focusItems) {
-              const chip = document.createElement("span");
-              chip.className = "path-chip";
-              chip.textContent = item.keys + " · " + item.displayTitle;
-              itemList.append(chip);
-            }
-
-            const hint = document.createElement("div");
-            hint.className = "path-hint";
-            hint.textContent = step.readinessHint;
-
-            const action = document.createElement("button");
-            action.className = "secondary path-action";
-            action.type = "button";
-            action.textContent = step.focusActionLabel;
-            action.addEventListener("click", () => {
-              searchInput.value = "";
-              categorySelect.value = "All";
-              stageSelect.value = step.stage;
-              favoritesOnly.checked = false;
-              postFilter();
+          const modeToggle = document.createElement("label");
+          modeToggle.className = "mode-toggle";
+          const showAll = document.createElement("input");
+          showAll.type = "checkbox";
+          showAll.id = "show-all";
+          showAll.checked = model.viewMode === "all";
+          const modeLabel = document.createElement("span");
+          modeLabel.textContent =
+            model.ui.showAllCommands + " · " + (model.viewMode === "all" ? model.ui.referenceModeLabel : model.ui.practiceModeLabel);
+          showAll.addEventListener("change", () => {
+            searchInput.value = "";
+            categorySelect.value = "All";
+            stageSelect.value = "All";
+            favoritesOnly.checked = false;
+            postFilter({
+              query: "",
+              category: "All",
+              stage: "All",
+              favoritesOnly: false,
+              viewMode: showAll.checked ? "all" : "practice"
             });
+          });
+          modeToggle.append(showAll, modeLabel);
 
-            card.append(topLine, description, itemLabel, itemList, hint, action);
-            list.append(card);
+          const list = document.createElement("div");
+          list.className = "lesson-list";
+
+          for (const lesson of model.lessons) {
+            list.append(renderLesson(lesson, model));
           }
 
-          learningPath.append(head, list);
+          curriculum.append(head, modeToggle, list);
+        }
+
+        function renderLesson(lesson, model) {
+          const card = document.createElement("details");
+          card.className = lesson.active ? "lesson-card active" : "lesson-card";
+          card.open = lesson.initiallyOpen;
+
+          const summary = document.createElement("summary");
+          const topLine = document.createElement("div");
+          topLine.className = "lesson-summary-top";
+          const title = document.createElement("div");
+          title.className = "lesson-title";
+          title.textContent = lesson.active ? model.ui.currentLesson + ": " + lesson.title : lesson.title;
+          const meta = document.createElement("div");
+          meta.className = "lesson-meta";
+          meta.textContent = lesson.stageLabel + " · " + lesson.itemCount;
+          topLine.append(title, meta);
+
+          const description = document.createElement("p");
+          description.className = "lesson-description";
+          description.textContent = lesson.description;
+          summary.append(topLine, description);
+
+          const body = document.createElement("div");
+          body.className = "lesson-body";
+
+          const practiceLabel = document.createElement("div");
+          practiceLabel.className = "lesson-label";
+          practiceLabel.textContent = model.ui.practicePrompt;
+          const practice = document.createElement("p");
+          practice.className = "lesson-practice";
+          practice.textContent = lesson.practicePrompt;
+
+          const itemLabel = document.createElement("div");
+          itemLabel.className = "lesson-label";
+          itemLabel.textContent = model.ui.lessonItemsLabel;
+          const itemList = document.createElement("div");
+          itemList.className = "lesson-items";
+          for (const item of lesson.items) {
+            const row = document.createElement("div");
+            row.className = "lesson-item";
+            const keys = document.createElement("code");
+            keys.textContent = item.keys;
+            const itemTitle = document.createElement("div");
+            itemTitle.className = "lesson-item-title";
+            itemTitle.textContent = item.displayTitle;
+            row.append(keys, itemTitle);
+            itemList.append(row);
+          }
+
+          const readinessLabel = document.createElement("div");
+          readinessLabel.className = "lesson-label";
+          readinessLabel.textContent = model.ui.readiness;
+          const readiness = document.createElement("p");
+          readiness.className = "lesson-readiness";
+          readiness.textContent = lesson.readinessHint;
+
+          const action = document.createElement("button");
+          action.className = "secondary lesson-action";
+          action.type = "button";
+          action.textContent = lesson.active ? model.ui.practicingNow : model.ui.practiceThisLesson;
+          action.disabled = lesson.active && model.viewMode === "practice";
+          action.addEventListener("click", () => {
+            searchInput.value = "";
+            categorySelect.value = "All";
+            stageSelect.value = lesson.stage;
+            favoritesOnly.checked = false;
+            postFilter({
+              query: "",
+              category: "All",
+              stage: lesson.stage,
+              favoritesOnly: false,
+              viewMode: "practice",
+              lesson: lesson.id
+            });
+          });
+
+          body.append(practiceLabel, practice, itemLabel, itemList, readinessLabel, readiness, action);
+          card.append(summary, body);
+          return card;
         }
 
         function renderGuidance(model) {
@@ -838,43 +900,6 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
           guidance.textContent = model.guidanceText;
         }
 
-        function renderStarter(model) {
-          starter.replaceChildren();
-
-          if (model.starterItems.length === 0 || model.learningPath.length > 0) {
-            starter.hidden = true;
-            return;
-          }
-
-          starter.hidden = false;
-          const title = document.createElement("div");
-          title.className = "starter-title";
-          title.textContent = model.ui.startHere;
-          const list = document.createElement("div");
-          list.className = "starter-list";
-
-          for (const item of model.starterItems) {
-            const chip = document.createElement("button");
-            chip.className = "starter-chip secondary";
-            chip.type = "button";
-            chip.title = item.displayTitle;
-            chip.setAttribute("aria-label", model.ui.searchStarterPrefix + item.displayTitle);
-            chip.addEventListener("click", () => {
-              searchInput.value = item.displayTitle;
-              postFilter();
-            });
-
-            const keys = document.createElement("code");
-            keys.textContent = item.keys;
-            const label = document.createElement("span");
-            label.textContent = item.displayTitle;
-            chip.append(keys, label);
-            list.append(chip);
-          }
-
-          starter.append(title, list);
-        }
-
         function renderNotice() {
           notice.hidden = true;
           notice.textContent = "";
@@ -882,6 +907,14 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
 
     function renderItems(model) {
       results.replaceChildren();
+
+          const title = document.createElement("div");
+          title.className = "results-title";
+          title.textContent =
+            model.viewMode === "practice" && model.query.trim().length === 0 && model.category === "All" && !model.favoritesOnly && model.currentLesson
+              ? model.ui.currentLesson + ": " + model.currentLesson.title
+              : model.ui.resultsTitle;
+          results.append(title);
 
           if (model.items.length === 0) {
             const empty = document.createElement("div");
