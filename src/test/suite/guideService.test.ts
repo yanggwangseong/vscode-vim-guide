@@ -1,6 +1,7 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
 import { GuideItem, guideItemStageOverrides, guideItemStages, guideItems } from "../../data/guideData";
+import { koreanGuideItemText } from "../../data/localization";
 import {
   ALLOWED_VSCODE_COMMANDS,
   ALL_CATEGORY,
@@ -9,6 +10,7 @@ import {
   FAVORITES_KEY,
   GuideViewModel,
   GuideService,
+  LANGUAGE_KEY,
   StateStore,
   parseVscodeVimConfig
 } from "../../services/guideService";
@@ -158,6 +160,21 @@ suite("guide data", () => {
     }
   });
 
+  test("has Korean localization coverage for every guide item", () => {
+    const ids = new Set(guideItems.map((item) => item.id));
+
+    for (const item of guideItems) {
+      const localized = koreanGuideItemText[item.id];
+      assert.ok(localized, `missing Korean localization for ${item.id}`);
+      assert.ok(localized.title.length > 0, `Korean title is required for ${item.id}`);
+      assert.ok(localized.description.length > 0, `Korean description is required for ${item.id}`);
+    }
+
+    for (const id of Object.keys(koreanGuideItemText)) {
+      assert.ok(ids.has(id), `Korean localization references an unknown item: ${id}`);
+    }
+  });
+
   test("keeps executable command entries inside allowlist", () => {
     for (const item of guideItems) {
       if (item.type === "vscode-command") {
@@ -264,6 +281,35 @@ suite("GuideService", () => {
     assert.ok(productiveSearch.noResults, "Quick open is a beginner VS Code command and should not appear in productive-only results");
   });
 
+  test("localizes guide text and searches Korean copy", () => {
+    const service = createService();
+    const defaultModel = service.createViewModel({ language: "ko" });
+    const model = service.createViewModel({ query: "현재 줄 삭제", language: "ko" });
+
+    assert.strictEqual(model.language, "ko");
+    assert.strictEqual(model.languages.find((language) => language.id === "ko")?.label, "한국어");
+    assert.ok(defaultModel.guidanceText.includes("기본기"));
+    assert.ok(model.items.some((item) => item.id === "vim-edit-delete-line"));
+    const deleteLine = model.items.find((item) => item.id === "vim-edit-delete-line");
+    assert.strictEqual(deleteLine?.displayTitle, "현재 줄 삭제");
+    assert.strictEqual(deleteLine?.categoryLabel, "편집");
+    assert.strictEqual(deleteLine?.stageLabel, "입문");
+    assert.strictEqual(deleteLine?.actionLabel, "에디터에서 직접 입력");
+  });
+
+  test("persists display language through state", async () => {
+    const state = new MemoryState();
+    const service = createService(state);
+
+    assert.strictEqual(service.getLanguage(), "en");
+    await service.setLanguage("ko");
+
+    const reloaded = createService(state);
+    assert.strictEqual(state.get(LANGUAGE_KEY, "en"), "ko");
+    assert.strictEqual(reloaded.getLanguage(), "ko");
+    assert.strictEqual(reloaded.createViewModel().language, "ko");
+  });
+
   test("combines query, category, stage, and favorites-only filters", async () => {
     const state = new MemoryState();
     const service = createService(state);
@@ -296,13 +342,15 @@ suite("GuideService", () => {
       query: 42,
       category: 42,
       stage: "unknown-stage",
-      favoritesOnly: "yes"
+      favoritesOnly: "yes",
+      language: "fr"
     });
 
     assert.strictEqual(model.query, "");
     assert.strictEqual(model.category, ALL_CATEGORY);
     assert.strictEqual(model.stage, ALL_STAGE);
     assert.strictEqual(model.favoritesOnly, false);
+    assert.strictEqual(model.language, "en");
     assert.strictEqual(model.resultCount, 60);
   });
 
@@ -503,6 +551,7 @@ suite("GuideViewProvider", () => {
     assert.strictEqual(fake.webview.options.enableScripts, true);
     assert.ok(fake.webview.html.includes("Content-Security-Policy"));
     assert.ok(fake.webview.html.includes('id="search"'));
+    assert.ok(fake.webview.html.includes('id="language"'));
     assert.ok(fake.webview.html.includes('id="stage"'));
     assert.ok(fake.webview.html.includes('aria-label="Search guide items"'));
     assert.ok(fake.webview.html.includes('id="favorites-only"'));
@@ -516,8 +565,9 @@ suite("GuideViewProvider", () => {
     assert.ok(!fake.webview.html.includes(".empty {"));
     assert.ok(fake.webview.html.includes('"setting-value status-"'));
     assert.ok(fake.webview.html.includes("describeNoResults"));
-    assert.ok(fake.webview.html.includes("Toggle favorite for "));
+    assert.ok(fake.webview.html.includes("model.ui.favorites"));
     assert.ok(fake.webview.html.includes('"totalCount":60'));
+    assert.ok(fake.webview.html.includes('"label":"한국어"'));
     assert.ok(fake.webview.html.indexOf('id="results"') < fake.webview.html.indexOf('class="settings"'));
   });
 
@@ -544,6 +594,14 @@ suite("GuideViewProvider", () => {
     assert.strictEqual(model.stage, "beginner");
     assert.strictEqual(model.favoritesOnly, false);
     assert.ok(model.items.some((item) => item.id === "vim-edit-delete-line"));
+
+    fake.webview.receive({ type: "filter", query: "현재 줄 삭제", category: ALL_CATEGORY, stage: "beginner", favoritesOnly: false, language: "ko" });
+    await flushPromises();
+    model = latestViewModel(fake.webview);
+    assert.strictEqual(model.language, "ko");
+    assert.strictEqual(state.get(LANGUAGE_KEY, "en"), "ko");
+    assert.deepStrictEqual(model.items.map((item) => item.id), ["vim-edit-delete-line"]);
+    assert.strictEqual(model.items[0]?.displayTitle, "현재 줄 삭제");
 
     fake.webview.receive({ type: "toggleFavorite", id: "vim-edit-delete-line" });
     await flushPromises();

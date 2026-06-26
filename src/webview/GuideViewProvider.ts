@@ -10,6 +10,7 @@ type WebviewMessage =
       readonly category?: unknown;
       readonly stage?: unknown;
       readonly favoritesOnly?: unknown;
+      readonly language?: unknown;
     }
   | { readonly type: "toggleFavorite"; readonly id?: unknown }
   | { readonly type: "copy"; readonly id?: unknown }
@@ -25,7 +26,9 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
   public constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly guideService: GuideService
-  ) {}
+  ) {
+    this.filters = normalizeGuideFilters({ language: guideService.getLanguage() });
+  }
 
   public resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
@@ -64,7 +67,8 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
         await this.postViewModel();
         return;
       case "filter":
-        this.filters = normalizeGuideFilters(message);
+        this.filters = normalizeGuideFilters(message, this.filters.language);
+        await this.guideService.setLanguage(this.filters.language);
         await this.postViewModel();
         return;
       case "toggleFavorite":
@@ -480,12 +484,13 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       <span class="count" id="count" role="status" aria-live="polite"></span>
     </div>
 
-        <section class="controls" aria-label="Filters">
+        <section class="controls" id="controls" aria-label="Filters">
           <input id="search" type="search" placeholder="Search title, keys, category, tags" autocomplete="off" aria-label="Search guide items">
           <div class="filter-row">
+            <select id="language" aria-label="Display language"></select>
             <select id="stage" aria-label="Learning stage"></select>
-            <select id="category" aria-label="Category"></select>
           </div>
+          <select id="category" aria-label="Category"></select>
           <label class="toggle">
             <input id="favorites-only" type="checkbox">
             <span id="favorite-label">Favorites</span>
@@ -507,7 +512,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
 
     <section class="settings" aria-label="VSCodeVim settings">
       <div class="settings-header">
-        <div class="settings-title">VSCodeVim</div>
+        <div class="settings-title" id="settings-title">VSCodeVim</div>
         <button class="link" id="refresh" type="button">Refresh</button>
       </div>
       <div class="settings-status" id="vim-status"></div>
@@ -521,6 +526,8 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
     let debounceHandle;
 
         const searchInput = document.getElementById("search");
+        const controls = document.getElementById("controls");
+        const languageSelect = document.getElementById("language");
         const stageSelect = document.getElementById("stage");
         const categorySelect = document.getElementById("category");
         const favoritesOnly = document.getElementById("favorites-only");
@@ -531,6 +538,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
         const notice = document.getElementById("notice");
         const results = document.getElementById("results");
         const settingsList = document.getElementById("settings-list");
+        const settingsTitle = document.getElementById("settings-title");
         const vimStatus = document.getElementById("vim-status");
         const vimSummaryStatus = document.getElementById("vim-summary-status");
         const refresh = document.getElementById("refresh");
@@ -549,6 +557,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
         });
 
         categorySelect.addEventListener("change", postFilter);
+        languageSelect.addEventListener("change", postFilter);
         stageSelect.addEventListener("change", postFilter);
         favoritesOnly.addEventListener("change", postFilter);
         refresh.addEventListener("click", () => vscode.postMessage({ type: "refreshConfig" }));
@@ -560,14 +569,26 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
             query: searchInput.value,
             category: categorySelect.value,
             stage: stageSelect.value,
-            favoritesOnly: favoritesOnly.checked
+            favoritesOnly: favoritesOnly.checked,
+            language: languageSelect.value
           });
         }
 
         function render(model) {
+          document.documentElement.lang = model.language === "ko" ? "ko" : "en";
+          searchInput.placeholder = model.ui.searchPlaceholder;
+          searchInput.setAttribute("aria-label", model.ui.searchAriaLabel);
+          controls.setAttribute("aria-label", model.ui.filtersAriaLabel);
+          languageSelect.setAttribute("aria-label", model.ui.languageAriaLabel);
+          stageSelect.setAttribute("aria-label", model.ui.stageAriaLabel);
+          categorySelect.setAttribute("aria-label", model.ui.categoryAriaLabel);
           searchInput.value = model.query;
           favoritesOnly.checked = model.favoritesOnly;
-          favoriteLabel.textContent = "Favorites (" + model.favoriteCount + ")";
+          favoriteLabel.textContent = model.ui.favorites + " (" + model.favoriteCount + ")";
+          refresh.textContent = model.ui.refresh;
+          refreshSummary.textContent = model.ui.refresh;
+          settingsTitle.textContent = "VSCodeVim";
+          renderLanguages(model);
           renderStages(model);
           renderCategories(model);
           renderSettings(model.vscodeVim);
@@ -576,7 +597,21 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
           renderNotice();
           renderItems(model);
           count.textContent = model.resultCount + "/" + model.totalCount;
-          count.setAttribute("aria-label", "Showing " + model.resultCount + " of " + model.totalCount + " guide items");
+          count.setAttribute(
+            "aria-label",
+            model.ui.countAriaPrefix + model.resultCount + model.ui.countAriaMiddle + model.totalCount + model.ui.countAriaSuffix
+          );
+        }
+
+        function renderLanguages(model) {
+          languageSelect.replaceChildren();
+          for (const language of model.languages) {
+            const option = document.createElement("option");
+            option.value = language.id;
+            option.textContent = language.label;
+            option.selected = language.id === model.language;
+            languageSelect.append(option);
+          }
         }
 
         function renderStages(model) {
@@ -592,11 +627,12 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
 
     function renderCategories(model) {
       categorySelect.replaceChildren();
-      for (const category of model.categories) {
+      const categories = model.categoryOptions ?? model.categories.map((category) => ({ id: category, label: category }));
+      for (const category of categories) {
         const option = document.createElement("option");
-        option.value = category;
-        option.textContent = category;
-        option.selected = category === model.category;
+        option.value = category.id;
+        option.textContent = category.label;
+        option.selected = category.id === model.category;
         categorySelect.append(option);
       }
     }
@@ -604,11 +640,11 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
         function renderSettings(snapshot) {
           let statusText;
           if (!snapshot.installed) {
-            statusText = "VSCodeVim extension not detected";
+            statusText = currentModel.ui.vscodeVimNotDetected;
           } else if (snapshot.configured) {
-            statusText = "extension detected, tracked settings found";
+            statusText = currentModel.ui.vscodeVimConfigured;
           } else {
-            statusText = "extension detected, no tracked settings configured";
+            statusText = currentModel.ui.vscodeVimNoTrackedSettings;
           }
           vimSummaryStatus.textContent = statusText;
           vimStatus.textContent = statusText;
@@ -658,7 +694,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
           starter.hidden = false;
           const title = document.createElement("div");
           title.className = "starter-title";
-          title.textContent = "Start here";
+          title.textContent = model.ui.startHere;
           const list = document.createElement("div");
           list.className = "starter-list";
 
@@ -666,17 +702,17 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
             const chip = document.createElement("button");
             chip.className = "starter-chip secondary";
             chip.type = "button";
-            chip.title = item.title;
-            chip.setAttribute("aria-label", "Search " + item.title);
+            chip.title = item.displayTitle;
+            chip.setAttribute("aria-label", model.ui.searchStarterPrefix + item.displayTitle);
             chip.addEventListener("click", () => {
-              searchInput.value = item.title;
+              searchInput.value = item.displayTitle;
               postFilter();
             });
 
             const keys = document.createElement("code");
             keys.textContent = item.keys;
             const label = document.createElement("span");
-            label.textContent = item.title;
+            label.textContent = item.displayTitle;
             chip.append(keys, label);
             list.append(chip);
           }
@@ -709,20 +745,21 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       const filters = [];
       const query = model.query.trim();
       if (query.length > 0) {
-        filters.push('search "' + query + '"');
+        filters.push(model.ui.searchFilterLabel + ' "' + query + '"');
       }
           if (model.category !== "All") {
-            filters.push('category "' + model.category + '"');
+            const selectedCategory = model.categoryOptions.find((category) => category.id === model.category);
+            filters.push(model.ui.categoryFilterLabel + ' "' + (selectedCategory?.label ?? model.category) + '"');
           }
           if (model.stage !== "All") {
             const selectedStage = model.stages.find((stage) => stage.id === model.stage);
-            filters.push('stage "' + (selectedStage?.label ?? model.stage) + '"');
+            filters.push(model.ui.stageFilterLabel + ' "' + (selectedStage?.label ?? model.stage) + '"');
           }
           if (model.favoritesOnly) {
-            filters.push("favorites");
+            filters.push(model.ui.favoritesFilterLabel);
           }
 
-          return filters.length > 0 ? "No matches for " + filters.join(" and ") + "." : "No guide items available.";
+          return filters.length > 0 ? model.ui.noMatchesFor + filters.join(model.ui.filterJoin) + "." : model.ui.noGuideItems;
         }
 
     function renderItem(item) {
@@ -735,7 +772,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       const titleWrap = document.createElement("div");
       const title = document.createElement("h2");
       title.className = "item-title";
-      title.textContent = item.title;
+      title.textContent = item.displayTitle;
       const keys = document.createElement("code");
       keys.className = "keys";
       keys.textContent = item.keys;
@@ -744,23 +781,23 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       const favorite = document.createElement("button");
       favorite.className = "secondary";
       favorite.type = "button";
-      favorite.textContent = item.favorite ? "Unfavorite" : "Favorite";
+      favorite.textContent = item.favorite ? currentModel.ui.removeFavorite : currentModel.ui.addFavorite;
       favorite.title = item.favorite ? "Remove from favorites" : "Add to favorites";
       favorite.setAttribute("aria-pressed", item.favorite ? "true" : "false");
-      favorite.setAttribute("aria-label", "Toggle favorite for " + item.title);
+      favorite.setAttribute("aria-label", currentModel.ui.favorites + ": " + item.displayTitle);
       favorite.addEventListener("click", () => vscode.postMessage({ type: "toggleFavorite", id: item.id }));
 
       head.append(titleWrap, favorite);
 
       const description = document.createElement("p");
       description.className = "description";
-      description.textContent = item.description;
+      description.textContent = item.displayDescription;
 
           const meta = document.createElement("div");
           meta.className = "meta";
           meta.append(
             renderBadge(item.stageLabel, "secondary-badge"),
-            renderBadge(item.category, "secondary-badge"),
+            renderBadge(item.categoryLabel, "secondary-badge"),
             renderBadge(item.actionLabel, item.executable ? "" : "secondary-badge")
           );
 
@@ -770,18 +807,18 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       const copy = document.createElement("button");
       copy.className = "secondary";
       copy.type = "button";
-      copy.textContent = "Copy";
+      copy.textContent = currentModel.ui.copy;
       copy.title = "Copy keys";
-      copy.setAttribute("aria-label", "Copy keys for " + item.title);
+      copy.setAttribute("aria-label", currentModel.ui.copy + ": " + item.displayTitle);
       copy.addEventListener("click", () => vscode.postMessage({ type: "copy", id: item.id }));
       actions.append(copy);
 
       if (item.executable) {
         const run = document.createElement("button");
         run.type = "button";
-        run.textContent = "Run";
+        run.textContent = currentModel.ui.run;
         run.title = "Run VS Code command";
-        run.setAttribute("aria-label", "Run " + item.title);
+        run.setAttribute("aria-label", currentModel.ui.run + ": " + item.displayTitle);
         run.addEventListener("click", () => vscode.postMessage({ type: "run", id: item.id }));
         actions.append(run);
       }

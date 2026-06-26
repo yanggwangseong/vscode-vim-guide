@@ -1,9 +1,20 @@
 import * as vscode from "vscode";
 import { GuideItem, GuideItemStage, guideItemStages, guideItems } from "../data/guideData";
+import {
+  GuideLanguage,
+  GuideLanguageOption,
+  getActionLabel,
+  getCategoryLabel,
+  getGuideItemText,
+  getStageLabel,
+  guideLanguageOptions,
+  isGuideLanguage
+} from "../data/localization";
 
 export const ALL_CATEGORY = "All";
 export const ALL_STAGE = "All";
 export const FAVORITES_KEY = "vimGuide.favoriteIds.v1";
+export const LANGUAGE_KEY = "vimGuide.language.v1";
 const MAX_BINDING_ENTRIES_TO_INSPECT = 100;
 const MAX_BINDING_SAMPLES = 3;
 const MAX_SUMMARY_TEXT_LENGTH = 80;
@@ -57,6 +68,9 @@ export interface ConfigurationReader {
 export interface GuideItemViewModel extends GuideItem {
   readonly favorite: boolean;
   readonly executable: boolean;
+  readonly displayTitle: string;
+  readonly displayDescription: string;
+  readonly categoryLabel: string;
   readonly stageLabel: string;
   readonly actionLabel: string;
 }
@@ -73,6 +87,7 @@ export interface GuideFilterInput {
   readonly category?: unknown;
   readonly stage?: unknown;
   readonly favoritesOnly?: unknown;
+  readonly language?: unknown;
 }
 
 export interface GuideFilters {
@@ -80,15 +95,55 @@ export interface GuideFilters {
   readonly category: string;
   readonly stage: GuideStageFilter;
   readonly favoritesOnly: boolean;
+  readonly language: GuideLanguage;
+}
+
+export interface GuideCategoryOption {
+  readonly id: string;
+  readonly label: string;
+}
+
+export interface GuideUiText {
+  readonly searchPlaceholder: string;
+  readonly searchAriaLabel: string;
+  readonly filtersAriaLabel: string;
+  readonly languageAriaLabel: string;
+  readonly stageAriaLabel: string;
+  readonly categoryAriaLabel: string;
+  readonly favorites: string;
+  readonly startHere: string;
+  readonly refresh: string;
+  readonly copy: string;
+  readonly run: string;
+  readonly addFavorite: string;
+  readonly removeFavorite: string;
+  readonly vscodeVimNotDetected: string;
+  readonly vscodeVimConfigured: string;
+  readonly vscodeVimNoTrackedSettings: string;
+  readonly noMatchesFor: string;
+  readonly noGuideItems: string;
+  readonly searchFilterLabel: string;
+  readonly categoryFilterLabel: string;
+  readonly stageFilterLabel: string;
+  readonly favoritesFilterLabel: string;
+  readonly filterJoin: string;
+  readonly countAriaPrefix: string;
+  readonly countAriaMiddle: string;
+  readonly countAriaSuffix: string;
+  readonly searchStarterPrefix: string;
 }
 
 export interface GuideViewModel {
   readonly query: string;
   readonly category: string;
+  readonly categoryLabel: string;
+  readonly language: GuideLanguage;
+  readonly languages: readonly GuideLanguageOption[];
   readonly stage: GuideStageFilter;
   readonly stages: readonly GuideStageOption[];
   readonly favoritesOnly: boolean;
   readonly categories: readonly string[];
+  readonly categoryOptions: readonly GuideCategoryOption[];
   readonly totalCount: number;
   readonly resultCount: number;
   readonly favoriteCount: number;
@@ -97,6 +152,7 @@ export interface GuideViewModel {
   readonly items: readonly GuideItemViewModel[];
   readonly starterItems: readonly GuideItemViewModel[];
   readonly guidanceText: string;
+  readonly ui: GuideUiText;
   readonly vscodeVim: VscodeVimSnapshot;
 }
 
@@ -164,11 +220,31 @@ export class GuideService {
     return [ALL_CATEGORY, ...ordered, ...remaining];
   }
 
-  public getStages(): readonly GuideStageOption[] {
+  public getCategoryOptions(language: GuideLanguage = this.getLanguage()): readonly GuideCategoryOption[] {
+    return this.getCategories().map((category) => ({
+      id: category,
+      label: getCategoryLabel(category, language)
+    }));
+  }
+
+  public getLanguages(): readonly GuideLanguageOption[] {
+    return guideLanguageOptions;
+  }
+
+  public getStages(language: GuideLanguage = this.getLanguage()): readonly GuideStageOption[] {
     return [
-      { id: ALL_STAGE, label: "All stages" },
-      ...guideItemStages.map((stage) => ({ id: stage, label: stageLabel(stage) }))
+      { id: ALL_STAGE, label: language === "ko" ? "전체 단계" : "All stages" },
+      ...guideItemStages.map((stage) => ({ id: stage, label: getStageLabel(stage, language) }))
     ];
+  }
+
+  public getLanguage(): GuideLanguage {
+    const stored = this.state.get<unknown>(LANGUAGE_KEY, "en");
+    return isGuideLanguage(stored) ? stored : "en";
+  }
+
+  public async setLanguage(language: GuideLanguage): Promise<void> {
+    await this.state.update(LANGUAGE_KEY, language);
   }
 
   public getFavoriteIds(): readonly string[] {
@@ -206,7 +282,8 @@ export class GuideService {
 
   public searchItems(queryOrFilters: string | GuideFilterInput = "", category = ALL_CATEGORY): readonly GuideItem[] {
     const filters = normalizeGuideFilters(
-      typeof queryOrFilters === "string" ? { query: queryOrFilters, category } : queryOrFilters
+      typeof queryOrFilters === "string" ? { query: queryOrFilters, category } : queryOrFilters,
+      this.getLanguage()
     );
     const normalizedQuery = normalize(filters.query);
 
@@ -224,27 +301,32 @@ export class GuideService {
         return true;
       }
 
-      return searchableText(item).includes(normalizedQuery);
+      return searchableText(item, filters.language).includes(normalizedQuery);
     });
   }
 
   public createViewModel(queryOrFilters: string | GuideFilterInput = "", category = ALL_CATEGORY): GuideViewModel {
     const filters = normalizeGuideFilters(
-      typeof queryOrFilters === "string" ? { query: queryOrFilters, category } : queryOrFilters
+      typeof queryOrFilters === "string" ? { query: queryOrFilters, category } : queryOrFilters,
+      this.getLanguage()
     );
     const favoriteIds = new Set(this.getFavoriteIds());
     const results = this.searchItems(filters)
       .filter((item) => !filters.favoritesOnly || favoriteIds.has(item.id))
-      .map((item) => this.toViewModel(item, favoriteIds));
+      .map((item) => this.toViewModel(item, favoriteIds, filters.language));
     const starterItems = this.getStarterItems(filters, favoriteIds);
 
     return {
       query: filters.query,
       category: filters.category,
+      categoryLabel: getCategoryLabel(filters.category, filters.language),
+      language: filters.language,
+      languages: this.getLanguages(),
       stage: filters.stage,
-      stages: this.getStages(),
+      stages: this.getStages(filters.language),
       favoritesOnly: filters.favoritesOnly,
       categories: this.getCategories(),
+      categoryOptions: this.getCategoryOptions(filters.language),
       totalCount: this.items.length,
       resultCount: results.length,
       favoriteCount: favoriteIds.size,
@@ -253,7 +335,8 @@ export class GuideService {
       items: results,
       starterItems,
       guidanceText: getGuidanceText(filters, favoriteIds.size),
-      vscodeVim: this.getVscodeVimSnapshot()
+      ui: getUiText(filters.language),
+      vscodeVim: this.getVscodeVimSnapshot(filters.language)
     };
   }
 
@@ -280,18 +363,22 @@ export class GuideService {
     return item.command;
   }
 
-  public getVscodeVimSnapshot(): VscodeVimSnapshot {
-    return parseVscodeVimConfig(this.configurationReader(), this.extensionInstalled());
+  public getVscodeVimSnapshot(language: GuideLanguage = this.getLanguage()): VscodeVimSnapshot {
+    return parseVscodeVimConfig(this.configurationReader(), this.extensionInstalled(), language);
   }
 
-  private toViewModel(item: GuideItem, favoriteIds: ReadonlySet<string>): GuideItemViewModel {
+  private toViewModel(item: GuideItem, favoriteIds: ReadonlySet<string>, language: GuideLanguage): GuideItemViewModel {
     const executable = this.isExecutable(item);
+    const text = getGuideItemText(item, language);
     return {
       ...item,
       favorite: favoriteIds.has(item.id),
       executable,
-      stageLabel: stageLabel(item.stage),
-      actionLabel: actionLabel(item, executable)
+      displayTitle: text.title,
+      displayDescription: text.description,
+      categoryLabel: getCategoryLabel(item.category, language),
+      stageLabel: getStageLabel(item.stage, language),
+      actionLabel: getActionLabel(item.type, executable, language)
     };
   }
 
@@ -307,16 +394,17 @@ export class GuideService {
 
     return STARTER_ITEM_IDS.map((id) => this.itemMap.get(id))
       .filter((item): item is GuideItem => item !== undefined)
-      .map((item) => this.toViewModel(item, favoriteIds));
+      .map((item) => this.toViewModel(item, favoriteIds, filters.language));
   }
 }
 
-export function normalizeGuideFilters(input: GuideFilterInput = {}): GuideFilters {
+export function normalizeGuideFilters(input: GuideFilterInput = {}, fallbackLanguage: GuideLanguage = "en"): GuideFilters {
   return {
     query: typeof input.query === "string" ? input.query : "",
     category: typeof input.category === "string" && input.category.trim().length > 0 ? input.category : ALL_CATEGORY,
     stage: isGuideStageFilter(input.stage) ? input.stage : ALL_STAGE,
-    favoritesOnly: input.favoritesOnly === true
+    favoritesOnly: input.favoritesOnly === true,
+    language: isGuideLanguage(input.language) ? input.language : fallbackLanguage
   };
 }
 
@@ -324,13 +412,32 @@ export function isGuideStageFilter(value: unknown): value is GuideStageFilter {
   return value === ALL_STAGE || guideItemStages.some((stage) => stage === value);
 }
 
-export function parseVscodeVimConfig(config: ConfigurationReader, installed: boolean): VscodeVimSnapshot {
+export function parseVscodeVimConfig(
+  config: ConfigurationReader,
+  installed: boolean,
+  language: GuideLanguage = "en"
+): VscodeVimSnapshot {
   const settings: readonly SettingSummary[] = [
-    summarizeStringSetting("vim.leader", "Leader", config.get<unknown>("leader")),
-    summarizeBindingSetting("vim.normalModeKeyBindings", "Normal mode bindings", config.get<unknown>("normalModeKeyBindings")),
-    summarizeBindingSetting("vim.visualModeKeyBindings", "Visual mode bindings", config.get<unknown>("visualModeKeyBindings")),
-    summarizeBindingSetting("vim.insertModeKeyBindings", "Insert mode bindings", config.get<unknown>("insertModeKeyBindings")),
-    summarizeBooleanSetting("vim.useSystemClipboard", "System clipboard", config.get<unknown>("useSystemClipboard"))
+    summarizeStringSetting("vim.leader", settingLabel("leader", language), config.get<unknown>("leader"), language),
+    summarizeBindingSetting(
+      "vim.normalModeKeyBindings",
+      settingLabel("normal", language),
+      config.get<unknown>("normalModeKeyBindings"),
+      language
+    ),
+    summarizeBindingSetting(
+      "vim.visualModeKeyBindings",
+      settingLabel("visual", language),
+      config.get<unknown>("visualModeKeyBindings"),
+      language
+    ),
+    summarizeBindingSetting(
+      "vim.insertModeKeyBindings",
+      settingLabel("insert", language),
+      config.get<unknown>("insertModeKeyBindings"),
+      language
+    ),
+    summarizeBooleanSetting("vim.useSystemClipboard", settingLabel("clipboard", language), config.get<unknown>("useSystemClipboard"), language)
   ];
 
   return {
@@ -340,41 +447,41 @@ export function parseVscodeVimConfig(config: ConfigurationReader, installed: boo
   };
 }
 
-function summarizeStringSetting(key: string, label: string, value: unknown): SettingSummary {
+function summarizeStringSetting(key: string, label: string, value: unknown, language: GuideLanguage): SettingSummary {
   if (value === undefined || value === null || value === "") {
-    return { key, label, status: "empty", value: "not configured" };
+    return { key, label, status: "empty", value: settingText(language).notConfigured };
   }
 
   if (typeof value !== "string") {
-    return { key, label, status: "invalid", value: "invalid", detail: "Expected a string value." };
+    return { key, label, status: "invalid", value: settingText(language).invalid, detail: settingText(language).expectedString };
   }
 
   return { key, label, status: "ok", value: truncateSummary(value) };
 }
 
-function summarizeBooleanSetting(key: string, label: string, value: unknown): SettingSummary {
+function summarizeBooleanSetting(key: string, label: string, value: unknown, language: GuideLanguage): SettingSummary {
   if (value === undefined || value === null) {
-    return { key, label, status: "empty", value: "not configured" };
+    return { key, label, status: "empty", value: settingText(language).notConfigured };
   }
 
   if (typeof value !== "boolean") {
-    return { key, label, status: "invalid", value: "invalid", detail: "Expected a boolean value." };
+    return { key, label, status: "invalid", value: settingText(language).invalid, detail: settingText(language).expectedBoolean };
   }
 
-  return { key, label, status: "ok", value: value ? "enabled" : "disabled" };
+  return { key, label, status: "ok", value: value ? settingText(language).enabled : settingText(language).disabled };
 }
 
-function summarizeBindingSetting(key: string, label: string, value: unknown): SettingSummary {
+function summarizeBindingSetting(key: string, label: string, value: unknown, language: GuideLanguage): SettingSummary {
   if (value === undefined || value === null) {
-    return { key, label, status: "empty", value: "0 bindings" };
+    return { key, label, status: "empty", value: bindingCountText(0, language) };
   }
 
   if (!Array.isArray(value)) {
-    return { key, label, status: "invalid", value: "invalid", detail: "Expected an array of keybinding objects." };
+    return { key, label, status: "invalid", value: settingText(language).invalid, detail: settingText(language).expectedBindingArray };
   }
 
   if (value.length === 0) {
-    return { key, label, status: "empty", value: "0 bindings" };
+    return { key, label, status: "empty", value: bindingCountText(0, language) };
   }
 
   const inspected = value.slice(0, MAX_BINDING_ENTRIES_TO_INSPECT);
@@ -385,14 +492,14 @@ function summarizeBindingSetting(key: string, label: string, value: unknown): Se
   const detailParts = [...samples];
 
   if (remainingCount > 0) {
-    detailParts.push(`Only first ${MAX_BINDING_ENTRIES_TO_INSPECT} bindings inspected; ${remainingCount} more omitted.`);
+    detailParts.push(omittedBindingText(remainingCount, language));
   }
 
   return {
     key,
     label,
     status: invalidCount > 0 ? "invalid" : "ok",
-    value: `${value.length} binding${value.length === 1 ? "" : "s"}`,
+    value: bindingCountText(value.length, language),
     detail: detailParts.join("; ")
   };
 }
@@ -465,8 +572,22 @@ function summarizeCommandList(value: unknown): ArraySummary {
   return { text: appendOmittedCount(commands.join(", "), omittedCount), invalid: false };
 }
 
-function searchableText(item: GuideItem): string {
-  return normalize([item.title, item.keys, item.description, item.category, stageLabel(item.stage), ...item.tags].join(" "));
+function searchableText(item: GuideItem, language: GuideLanguage): string {
+  const text = getGuideItemText(item, language);
+  return normalize(
+    [
+      item.title,
+      text.title,
+      item.keys,
+      item.description,
+      text.description,
+      item.category,
+      getCategoryLabel(item.category, language),
+      getStageLabel(item.stage, language),
+      ...item.tags,
+      ...(text.tags ?? [])
+    ].join(" ")
+  );
 }
 
 function normalize(value: string): string {
@@ -509,6 +630,34 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function getGuidanceText(filters: GuideFilters, favoriteCount: number): string {
+  if (filters.language === "ko") {
+    if (filters.favoritesOnly && favoriteCount === 0) {
+      return "자주 연습할 명령을 즐겨찾기에 추가해 나만의 연습 큐를 만드세요.";
+    }
+
+    if (filters.favoritesOnly) {
+      return "연습 큐: 저장해 둔 Vim 명령과 생산성 팁입니다.";
+    }
+
+    if (filters.stage === "beginner") {
+      return "입문 경로: 모드, 이동, 기본 편집부터 익힙니다.";
+    }
+
+    if (filters.stage === "productive") {
+      return "실무 생산성 경로: 검색, text object, register, VS Code 흐름을 익힙니다.";
+    }
+
+    if (filters.stage === "advanced") {
+      return "고급 경로: 매크로, 창 이동, VSCodeVim remap을 익힙니다.";
+    }
+
+    if (filters.query.trim().length === 0 && filters.category === ALL_CATEGORY) {
+      return "기본기부터 시작한 뒤 실무 생산성, 고급 단계로 넘어가세요.";
+    }
+
+    return "";
+  }
+
   if (filters.favoritesOnly && favoriteCount === 0) {
     return "Favorite commands to build a personal practice queue.";
   }
@@ -536,25 +685,144 @@ function getGuidanceText(filters: GuideFilters, favoriteCount: number): string {
   return "";
 }
 
-function stageLabel(stage: GuideItemStage): string {
-  switch (stage) {
-    case "beginner":
-      return "Beginner";
-    case "productive":
-      return "Productive";
-    case "advanced":
-      return "Advanced";
+function getUiText(language: GuideLanguage): GuideUiText {
+  if (language === "ko") {
+    return {
+      searchPlaceholder: "제목, 키, 카테고리, 설명 검색",
+      searchAriaLabel: "가이드 항목 검색",
+      filtersAriaLabel: "필터",
+      languageAriaLabel: "표시 언어",
+      stageAriaLabel: "학습 단계",
+      categoryAriaLabel: "카테고리",
+      favorites: "즐겨찾기",
+      startHere: "여기서 시작",
+      refresh: "새로고침",
+      copy: "복사",
+      run: "실행",
+      addFavorite: "즐겨찾기",
+      removeFavorite: "해제",
+      vscodeVimNotDetected: "VSCodeVim 확장이 감지되지 않았습니다",
+      vscodeVimConfigured: "확장이 감지되었고 추적 설정이 있습니다",
+      vscodeVimNoTrackedSettings: "확장은 감지되었지만 추적 설정은 없습니다",
+      noMatchesFor: "일치하는 항목 없음: ",
+      noGuideItems: "표시할 가이드 항목이 없습니다.",
+      searchFilterLabel: "검색",
+      categoryFilterLabel: "카테고리",
+      stageFilterLabel: "단계",
+      favoritesFilterLabel: "즐겨찾기",
+      filterJoin: " 및 ",
+      countAriaPrefix: "총 ",
+      countAriaMiddle: "개 중 ",
+      countAriaSuffix: "개 가이드 항목 표시",
+      searchStarterPrefix: "검색: "
+    };
+  }
+
+  return {
+    searchPlaceholder: "Search title, keys, category, tags",
+    searchAriaLabel: "Search guide items",
+    filtersAriaLabel: "Filters",
+    languageAriaLabel: "Display language",
+    stageAriaLabel: "Learning stage",
+    categoryAriaLabel: "Category",
+    favorites: "Favorites",
+    startHere: "Start here",
+    refresh: "Refresh",
+    copy: "Copy",
+    run: "Run",
+    addFavorite: "Favorite",
+    removeFavorite: "Unfavorite",
+    vscodeVimNotDetected: "VSCodeVim extension not detected",
+    vscodeVimConfigured: "extension detected, tracked settings found",
+    vscodeVimNoTrackedSettings: "extension detected, no tracked settings configured",
+    noMatchesFor: "No matches for ",
+    noGuideItems: "No guide items available.",
+    searchFilterLabel: "search",
+    categoryFilterLabel: "category",
+    stageFilterLabel: "stage",
+    favoritesFilterLabel: "favorites",
+    filterJoin: " and ",
+    countAriaPrefix: "Showing ",
+    countAriaMiddle: " of ",
+    countAriaSuffix: " guide items",
+    searchStarterPrefix: "Search "
+  };
+}
+
+function settingLabel(name: "leader" | "normal" | "visual" | "insert" | "clipboard", language: GuideLanguage): string {
+  if (language === "ko") {
+    switch (name) {
+      case "leader":
+        return "리더 키";
+      case "normal":
+        return "Normal 모드 매핑";
+      case "visual":
+        return "Visual 모드 매핑";
+      case "insert":
+        return "Insert 모드 매핑";
+      case "clipboard":
+        return "시스템 클립보드";
+    }
+  }
+
+  switch (name) {
+    case "leader":
+      return "Leader";
+    case "normal":
+      return "Normal mode bindings";
+    case "visual":
+      return "Visual mode bindings";
+    case "insert":
+      return "Insert mode bindings";
+    case "clipboard":
+      return "System clipboard";
   }
 }
 
-function actionLabel(item: GuideItem, executable: boolean): string {
-  if (executable) {
-    return "Runnable VS Code action";
+function settingText(language: GuideLanguage): {
+  readonly notConfigured: string;
+  readonly invalid: string;
+  readonly expectedString: string;
+  readonly expectedBoolean: string;
+  readonly expectedBindingArray: string;
+  readonly enabled: string;
+  readonly disabled: string;
+} {
+  if (language === "ko") {
+    return {
+      notConfigured: "설정 없음",
+      invalid: "잘못된 값",
+      expectedString: "문자열 값이어야 합니다.",
+      expectedBoolean: "boolean 값이어야 합니다.",
+      expectedBindingArray: "keybinding 객체 배열이어야 합니다.",
+      enabled: "켜짐",
+      disabled: "꺼짐"
+    };
   }
 
-  if (item.type === "tip") {
-    return "Tip";
+  return {
+    notConfigured: "not configured",
+    invalid: "invalid",
+    expectedString: "Expected a string value.",
+    expectedBoolean: "Expected a boolean value.",
+    expectedBindingArray: "Expected an array of keybinding objects.",
+    enabled: "enabled",
+    disabled: "disabled"
+  };
+}
+
+function bindingCountText(count: number, language: GuideLanguage): string {
+  if (language === "ko") {
+    return `${count}개 매핑`;
   }
 
-  return "Type in editor";
+  return `${count} binding${count === 1 ? "" : "s"}`;
+}
+
+function omittedBindingText(remainingCount: number, language: GuideLanguage): string {
+  if (language === "ko") {
+    return `처음 ${MAX_BINDING_ENTRIES_TO_INSPECT}개 매핑만 확인함; ${remainingCount}개는 생략됨.`;
+  }
+
+  return `Only first ${MAX_BINDING_ENTRIES_TO_INSPECT} bindings inspected; ${remainingCount} more omitted.`;
 }
