@@ -1,0 +1,70 @@
+{
+  "name": "vscode-vim-guide",
+  "displayName": "Vim Guide",
+  "description": "Searchable Vim command and productivity guide for VSCodeVim users.",
+  "version": "0.0.1",
+  "publisher": "localdev",
+  "private": true,
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onView:vimGuide.sidebar",
+    "onCommand:vimGuide.open",
+    "onCommand:vimGuide.refresh"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "vimGuide.open",
+        "title": "Vim Guide: Open"
+      },
+      {
+        "command": "vimGuide.refresh",
+        "title": "Vim Guide: Refresh"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "vimGuide",
+          "title": "Vim Guide",
+          "icon": "resources/vim-guide.svg"
+        }
+      ]
+    },
+    "views": {
+      "vimGuide": [
+        {
+          "id": "vimGuide.sidebar",
+          "name": "Vim Guide",
+          "type": "webview"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "test": "npm run compile && node ./out/test/runTest.js",
+    "package": "vsce package --no-dependencies --out dist/vscode-vim-guide-0.0.1.vsix"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.19.2",
+    "@types/vscode": "^1.91.0",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.6.0",
+    "eslint": "^8.57.1",
+    "mocha": "^10.8.2",
+    "typescript": "^5.8.3"
+  }
+}
