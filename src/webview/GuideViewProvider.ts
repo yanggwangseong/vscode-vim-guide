@@ -22,8 +22,10 @@ type WebviewMessage =
 
 export class GuideViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "vimGuide.sidebar";
+  public static readonly panelViewType = "vimGuide.practicePanel";
 
   private view?: vscode.WebviewView;
+  private panel?: vscode.WebviewPanel;
   private filters: GuideFilters = normalizeGuideFilters();
 
   public constructor(
@@ -46,13 +48,45 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       }
     });
 
-    webviewView.webview.options = {
+    this.configureWebview(webviewView.webview, "sidebar");
+  }
+
+  public openPanel(): void {
+    if (this.panel !== undefined) {
+      this.panel.reveal(vscode.ViewColumn.Beside);
+      void this.postViewModel().catch((error: unknown) => this.handleMessageError(error));
+      return;
+    }
+
+    const panel = vscode.window.createWebviewPanel(
+      GuideViewProvider.panelViewType,
+      "Vim Guide Practice",
+      { viewColumn: vscode.ViewColumn.Beside, preserveFocus: false },
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: this.getLocalResourceRoots()
+      }
+    );
+
+    this.panel = panel;
+    panel.onDidDispose(() => {
+      if (this.panel === panel) {
+        this.panel = undefined;
+      }
+    });
+
+    this.configureWebview(panel.webview, "panel");
+  }
+
+  private configureWebview(webview: vscode.Webview, surface: "sidebar" | "panel"): void {
+    webview.options = {
       enableScripts: true,
-      localResourceRoots: [this.extensionUri]
+      localResourceRoots: this.getLocalResourceRoots()
     };
 
-    webviewView.webview.html = this.getHtml();
-    webviewView.webview.onDidReceiveMessage((message: unknown) => {
+    webview.html = this.getHtml(surface);
+    webview.onDidReceiveMessage((message: unknown) => {
       if (isWebviewMessage(message)) {
         void this.handleMessage(message).catch((error: unknown) => this.handleMessageError(error));
       }
@@ -60,12 +94,16 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
   }
 
   public refresh(): boolean {
-    if (this.view === undefined) {
+    if (this.getWebviews().length === 0) {
       return false;
     }
 
     void this.postViewModel().catch((error: unknown) => this.handleMessageError(error));
     return true;
+  }
+
+  private getLocalResourceRoots(): readonly vscode.Uri[] {
+    return [vscode.Uri.joinPath(this.extensionUri, "resources")];
   }
 
   private async handleMessage(message: WebviewMessage): Promise<void> {
@@ -138,14 +176,24 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async postViewModel(model?: GuideViewModel): Promise<void> {
-    if (this.view === undefined) {
+    const webviews = this.getWebviews();
+    if (webviews.length === 0) {
       return;
     }
 
     const nextModel = model ?? this.guideService.createViewModel(this.filters);
-    const delivered = await this.view.webview.postMessage({ type: "viewModel", model: nextModel });
-    if (!delivered) {
-      void vscode.window.showWarningMessage("Vim Guide could not update the sidebar view. Reopen the view if it appears stale.");
+    const deliveries = await Promise.all(
+      webviews.map(async (webview) => {
+        try {
+          return await webview.postMessage({ type: "viewModel", model: nextModel });
+        } catch {
+          return false;
+        }
+      })
+    );
+
+    if (deliveries.every((delivered) => !delivered)) {
+      void vscode.window.showWarningMessage("Vim Guide could not update the open view. Reopen it if it appears stale.");
     }
   }
 
@@ -157,16 +205,28 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  private getHtml(): string {
+  private getWebviews(): readonly vscode.Webview[] {
+    const webviews: vscode.Webview[] = [];
+    if (this.view !== undefined) {
+      webviews.push(this.view.webview);
+    }
+    if (this.panel !== undefined) {
+      webviews.push(this.panel.webview);
+    }
+    return webviews;
+  }
+
+  private getHtml(surface: "sidebar" | "panel"): string {
     const nonce = getNonce();
     const model = this.guideService.createViewModel(this.filters);
     const initialModel = JSON.stringify(model).replace(/</g, "\\u003c");
+    const bodyClass = surface === "panel" ? "surface-panel" : "surface-sidebar";
 
     return /* html */ `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Vim Guide</title>
   <style nonce="${nonce}">
@@ -232,6 +292,18 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
       flex-direction: column;
       gap: 12px;
       min-width: 0;
+    }
+
+    .guide-layout,
+    .guide-primary,
+    .guide-results-pane {
+      display: grid;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    body.surface-panel {
+      background: var(--vscode-editor-background);
     }
 
     .title-row {
@@ -659,18 +731,51 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
             grid-template-columns: 1fr;
           }
         }
+
+        @media (min-width: 720px) {
+          body.surface-panel {
+            padding: 16px;
+          }
+
+          body.surface-panel .guide-layout {
+            grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+            align-items: start;
+          }
+
+          body.surface-panel .guide-primary {
+            position: sticky;
+            top: 0;
+            max-height: calc(100vh - 32px);
+            overflow: auto;
+            padding-right: 2px;
+          }
+
+          body.surface-panel .guide-results-pane {
+            align-content: start;
+          }
+
+          body.surface-panel .results {
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            align-items: start;
+          }
+
+          body.surface-panel .results-title,
+          body.surface-panel .empty-results,
+          body.surface-panel .detail-results {
+            grid-column: 1 / -1;
+          }
+        }
   </style>
 </head>
-<body>
+<body class="${bodyClass}">
   <main class="shell">
     <div class="title-row">
       <h1>Vim Guide</h1>
       <span class="count" id="count" role="status" aria-live="polite"></span>
     </div>
 
-        <section class="curriculum" id="curriculum" aria-label="Today's Vim practice"></section>
-        <div class="guidance" id="guidance" role="status" aria-live="polite" hidden></div>
-
+    <div class="guide-layout">
+      <div class="guide-primary">
         <section class="controls" id="controls" aria-label="Filters">
           <input id="search" type="search" placeholder="Search title, keys, category, tags" autocomplete="off" aria-label="Search guide items">
           <div class="filter-row">
@@ -684,6 +789,9 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
           </label>
         </section>
 
+        <section class="curriculum" id="curriculum" aria-label="Today's Vim practice"></section>
+        <div class="guidance" id="guidance" role="status" aria-live="polite" hidden></div>
+
         <section class="vim-summary" aria-label="VSCodeVim status">
           <div class="vim-summary-text">
             <div class="vim-summary-title">VSCodeVim</div>
@@ -692,17 +800,21 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
           <button class="link" id="refresh-summary" type="button">Refresh</button>
         </section>
 
+        <section class="settings" aria-label="VSCodeVim settings">
+          <div class="settings-header">
+            <div class="settings-title" id="settings-title">VSCodeVim</div>
+            <button class="link" id="refresh" type="button">Refresh</button>
+          </div>
+          <div class="settings-status" id="vim-status"></div>
+          <div class="settings-list" id="settings-list"></div>
+        </section>
+      </div>
+
+      <div class="guide-results-pane">
         <div class="notice" id="notice" role="status" aria-live="polite" hidden></div>
         <section class="results" id="results"></section>
-
-    <section class="settings" aria-label="VSCodeVim settings">
-      <div class="settings-header">
-        <div class="settings-title" id="settings-title">VSCodeVim</div>
-        <button class="link" id="refresh" type="button">Refresh</button>
       </div>
-      <div class="settings-status" id="vim-status"></div>
-      <div class="settings-list" id="settings-list"></div>
-    </section>
+    </div>
   </main>
 
   <script nonce="${nonce}">
@@ -900,7 +1012,7 @@ export class GuideViewProvider implements vscode.WebviewViewProvider {
           const list = document.createElement("div");
           list.className = "lesson-list";
 
-          if (model.currentLesson) {
+          if (model.viewMode === "practice" && model.currentLesson) {
             list.append(renderTodayLesson(model.currentLesson, model));
           }
 

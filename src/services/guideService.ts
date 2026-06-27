@@ -72,6 +72,15 @@ export interface GuideItemViewModel extends GuideItem {
   readonly actionLabel: string;
 }
 
+export interface GuideQuickPickItem {
+  readonly id: string;
+  readonly label: string;
+  readonly description: string;
+  readonly detail: string;
+  readonly executable: boolean;
+  readonly copyText: string;
+}
+
 export interface GuideLessonViewModel {
   readonly id: string;
   readonly stage: GuideItemStage;
@@ -481,6 +490,21 @@ export class GuideService {
     }
 
     return item.keys.length > 0 ? item.keys : item.title;
+  }
+
+  public getQuickPickItems(language: GuideLanguage = this.getLanguage()): readonly GuideQuickPickItem[] {
+    const favoriteIds = new Set(this.getFavoriteIds());
+    return this.items.map((item) => {
+      const viewItem = this.toViewModel(item, favoriteIds, language);
+      return {
+        id: viewItem.id,
+        label: `${viewItem.keys}  ${viewItem.displayTitle}`,
+        description: `${viewItem.categoryLabel} · ${viewItem.stageLabel} · ${viewItem.actionLabel}`,
+        detail: viewItem.displayDescription,
+        executable: viewItem.executable,
+        copyText: this.getCopyText(viewItem.id) ?? viewItem.keys
+      };
+    });
   }
 
   public async executeGuideCommand(id: string): Promise<string> {

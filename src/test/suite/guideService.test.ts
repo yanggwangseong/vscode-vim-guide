@@ -521,6 +521,27 @@ suite("GuideService", () => {
     );
   });
 
+  test("builds localized quick pick items without exposing raw command payloads", () => {
+    const service = createService();
+    const picks = service.getQuickPickItems("ko");
+    const deleteLine = picks.find((item) => item.id === "vim-edit-delete-line");
+    const saveFile = picks.find((item) => item.id === "vscode-command-save-file");
+
+    assert.strictEqual(picks.length, guideItems.length);
+    assert.ok(deleteLine?.label.includes("dd"));
+    assert.ok(deleteLine?.label.includes("현재 줄 삭제"));
+    assert.strictEqual(deleteLine?.copyText, "dd");
+    assert.strictEqual(deleteLine?.executable, false);
+    assert.ok(deleteLine?.description.includes("편집"));
+    assert.ok(deleteLine?.detail.includes("현재 줄"));
+
+    assert.ok(saveFile?.label.includes("Cmd+S"));
+    assert.strictEqual(saveFile?.executable, true);
+    assert.strictEqual(saveFile?.copyText, "Cmd+S");
+    assert.ok(!saveFile?.description.includes("workbench.action.files.save"));
+    assert.ok(!saveFile?.detail.includes("workbench.action.files.save"));
+  });
+
   test("rejects vscode-command items outside the allowlist without calling executor", async () => {
     const executed: string[] = [];
     const items: readonly GuideItem[] = [
@@ -667,6 +688,12 @@ suite("GuideViewProvider", () => {
 
     assert.strictEqual(fake.webview.options.enableScripts, true);
     assert.ok(fake.webview.html.includes("Content-Security-Policy"));
+    assert.ok(fake.webview.html.includes("base-uri 'none'"));
+    assert.ok(fake.webview.html.includes("form-action 'none'"));
+    assert.ok(fake.webview.html.includes('class="surface-sidebar"'));
+    assert.ok(fake.webview.html.includes(".surface-panel .guide-layout"));
+    assert.ok(fake.webview.html.includes('class="guide-layout"'));
+    assert.ok(fake.webview.html.includes('class="guide-results-pane"'));
     assert.ok(fake.webview.html.includes('id="curriculum"'));
     assert.ok(fake.webview.html.includes('id="search"'));
     assert.ok(fake.webview.html.includes('id="language"'));
@@ -692,8 +719,8 @@ suite("GuideViewProvider", () => {
     assert.ok(fake.webview.html.includes("model.ui.favorites"));
     assert.ok(fake.webview.html.includes('"totalCount":70'));
     assert.ok(fake.webview.html.includes('"label":"한국어"'));
-    assert.ok(fake.webview.html.indexOf('id="curriculum"') < fake.webview.html.indexOf('id="controls"'));
-    assert.ok(fake.webview.html.indexOf('id="results"') < fake.webview.html.indexOf('class="settings"'));
+    assert.ok(fake.webview.html.indexOf('id="controls"') < fake.webview.html.indexOf('id="curriculum"'));
+    assert.ok(fake.webview.html.indexOf('class="settings"') < fake.webview.html.indexOf('id="results"'));
   });
 
   test("posts updated view models for ready, filter, and favorite messages", async () => {
@@ -855,19 +882,32 @@ suite("extension activation", () => {
 
     const packageJson = extension.packageJSON as {
       contributes?: {
+        commands?: Array<{ command?: string; title?: string }>;
         viewsContainers?: { activitybar?: Array<{ id?: string; title?: string }> };
         views?: Record<string, Array<{ id?: string; name?: string; type?: string }>>;
+        walkthroughs?: Array<{
+          id?: string;
+          steps?: Array<{ id?: string; completionEvents?: readonly string[] }>;
+        }>;
       };
     };
     const activityBar = packageJson.contributes?.viewsContainers?.activitybar ?? [];
     const vimGuideContainer = activityBar.find((container) => container.id === "vimGuide");
     const vimGuideViews = packageJson.contributes?.views?.vimGuide ?? [];
+    const contributedCommands = packageJson.contributes?.commands ?? [];
+    const walkthrough = packageJson.contributes?.walkthroughs?.find((candidate) => candidate.id === "vimGuide.gettingStarted");
 
     assert.strictEqual(vimGuideContainer?.title, "Vim Guide");
     assert.ok(vimGuideViews.some((view) => view.id === "vimGuide.sidebar" && view.type === "webview"));
+    assert.ok(contributedCommands.some((command) => command.command === "vimGuide.openPanel"));
+    assert.ok(contributedCommands.some((command) => command.command === "vimGuide.search"));
+    assert.ok(walkthrough?.steps?.some((step) => step.completionEvents?.includes("onCommand:vimGuide.openPanel")));
+    assert.ok(walkthrough?.steps?.some((step) => step.completionEvents?.includes("onCommand:vimGuide.search")));
 
     const commands = await vscode.commands.getCommands(true);
     assert.ok(commands.includes("vimGuide.open"));
+    assert.ok(commands.includes("vimGuide.openPanel"));
+    assert.ok(commands.includes("vimGuide.search"));
     assert.ok(commands.includes("vimGuide.refresh"));
 
     await vscode.commands.executeCommand("vimGuide.refresh");

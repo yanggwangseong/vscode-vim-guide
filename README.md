@@ -7,6 +7,9 @@ This extension does not emulate Vim and does not replace VSCodeVim.
 ## Features
 
 - Activity Bar container and Sidebar view named `Vim Guide`.
+- Wider `Vim Guide: Open Practice Panel` command for using the guide beside an editor without moving the file explorer.
+- `Vim Guide: Search Commands` Quick Pick for finding and acting on commands without opening the sidebar.
+- Getting Started walkthrough for first-run discovery.
 - 57 Vim command and productivity tip entries.
 - 13 VS Code integration command entries.
 - Search across title, keys, description, category, learning stage, and tags.
@@ -75,7 +78,10 @@ code --extensionDevelopmentPath=/Users/hongseok/project/vscode-vim-guide
 In the Extension Development Host, verify:
 
 - Activity Bar includes `Vim Guide`.
-- Sidebar opens on `Today's Vim practice` with the current lesson expanded.
+- Sidebar opens with search/filter controls visible before the current practice lesson.
+- `Vim Guide: Open Practice Panel` opens a wider guide beside the editor; at wider sizes the lesson controls and results use separate columns.
+- `Vim Guide: Search Commands` opens a Quick Pick; selecting a Vim action copies its keys, while selecting an allowlisted VS Code command runs it.
+- Getting Started includes Vim Guide steps for opening the sidebar, practice panel, and Quick Pick search.
 - Search, learning-stage, category, and favorites-only filters update results.
 - Language selector switches between English and Korean, and Korean search terms return matching items.
 - Lesson cards expand/collapse and the active lesson shows practice instructions, readiness criteria, and focused items.
@@ -106,6 +112,10 @@ The webview sends guide item ids to the extension host. It never sends arbitrary
 | Baseline commit and feature diff exist | `git log --oneline`, `git diff --stat HEAD~1..HEAD` |
 | Activity Bar shows `Vim Guide` | `package.json` contributions, Extension Development Host smoke |
 | Sidebar renders initial list | `GuideViewProvider` fake webview HTML/model test; actual DOM render is covered by the Extension Development Host checklist |
+| Search controls are discoverable in the Sidebar first screen | `GuideViewProvider` HTML order test, Extension Development Host checklist |
+| Wide practice panel is available for right-side editor use | command contribution smoke, `GuideViewProvider` shared webview HTML/CSS tests, Extension Development Host checklist |
+| Quick Pick command search is available | activation smoke, `GuideService` quick pick item tests, Extension Development Host checklist |
+| Getting Started walkthrough exists | activation smoke for walkthrough contribution |
 | Search fields covered | `GuideService` seed and fixture tests |
 | Category and learning-stage filters | `GuideService` filter tests |
 | English/Korean language selector and Korean guide copy | localization coverage tests, `GuideService` Korean search/model tests, `GuideViewProvider` message tests |

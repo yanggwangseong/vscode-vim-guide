@@ -18,6 +18,8 @@
   "activationEvents": [
     "onView:vimGuide.sidebar",
     "onCommand:vimGuide.open",
+    "onCommand:vimGuide.openPanel",
+    "onCommand:vimGuide.search",
     "onCommand:vimGuide.refresh"
   ],
   "contributes": {
@@ -25,6 +27,14 @@
       {
         "command": "vimGuide.open",
         "title": "Vim Guide: Open"
+      },
+      {
+        "command": "vimGuide.openPanel",
+        "title": "Vim Guide: Open Practice Panel"
+      },
+      {
+        "command": "vimGuide.search",
+        "title": "Vim Guide: Search Commands"
       },
       {
         "command": "vimGuide.refresh",
@@ -48,7 +58,40 @@
           "type": "webview"
         }
       ]
-    }
+    },
+    "walkthroughs": [
+      {
+        "id": "vimGuide.gettingStarted",
+        "title": "Get Started with Vim Guide",
+        "description": "Learn VSCodeVim through small daily lessons, searchable commands, and read-only VSCodeVim setting checks.",
+        "steps": [
+          {
+            "id": "vimGuide.openSidebar",
+            "title": "Open the Vim Guide sidebar",
+            "description": "Use the Activity Bar view when you want a compact lesson queue next to your files.",
+            "completionEvents": [
+              "onCommand:vimGuide.open"
+            ]
+          },
+          {
+            "id": "vimGuide.openPanel",
+            "title": "Open the practice panel",
+            "description": "Use the practice panel when you want a wider lesson and reference view beside your editor.",
+            "completionEvents": [
+              "onCommand:vimGuide.openPanel"
+            ]
+          },
+          {
+            "id": "vimGuide.searchCommands",
+            "title": "Search commands from the Command Palette",
+            "description": "Run Vim Guide: Search Commands to find a Vim key or VS Code integration command without opening the sidebar.",
+            "completionEvents": [
+              "onCommand:vimGuide.search"
+            ]
+          }
+        ]
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
